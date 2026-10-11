@@ -1,0 +1,26 @@
+# Arch-based build/test image for rusty-bui.
+#
+# Arch matches the Omarchy base, so Qt6 and qmllint are the versions Omarchy
+# ships. Rust comes from the distro package (no rustup inside).
+FROM archlinux:latest
+
+RUN pacman -Syu --noconfirm --needed \
+      base-devel \
+      ca-certificates \
+      curl \
+      git \
+      jq \
+      ninja \
+      pkgconf \
+      python \
+      qt6-base \
+      qt6-declarative \
+      rust \
+ && pacman -Scc --noconfirm
+
+ENV CARGO_HOME=/cache/cargo \
+    CARGO_TARGET_DIR=/cache/target \
+    CARGO_TERM_COLOR=always \
+    RUST_BACKTRACE=1
+
+WORKDIR /work

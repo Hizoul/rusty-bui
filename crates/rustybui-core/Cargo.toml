@@ -1,0 +1,17 @@
+[package]
+name = "rustybui-core"
+description = "Weather data pipeline ported from WeatherMaster: KNMI, DWD and Open-Meteo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+base64.workspace = true
+chrono.workspace = true
+flate2.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true

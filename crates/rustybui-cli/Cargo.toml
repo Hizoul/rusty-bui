@@ -1,0 +1,20 @@
+[package]
+name = "rustybui-cli"
+description = "`rustybui` command line tool: nowcast, forecast, air quality, geocoding"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "rustybui"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+rustybui-core = { path = "../rustybui-core" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
