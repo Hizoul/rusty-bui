@@ -75,6 +75,11 @@ Attribution is rendered in the popout: **Radar © KNMI**, **Radar © DWD (Bright
 or **Model © Open-Meteo**, all CC BY 4.0. The location is whatever
 `rustybui set-location` stored (`rustybui which` shows it).
 
+Weather warnings are DWD's, and they appear in the app window and in `rustybui alerts`: this
+popout is about the two hours of rain ahead, and a warning card in it would compete with that.
+The location, clock and hours the window edits with `rustybui prefs` are shared with the CLI,
+not with this plugin, whose own settings come from Omarchy.
+
 ## Checking it
 
 ```bash

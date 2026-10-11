@@ -158,14 +158,16 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        var found = null
         try {
-          var found = JSON.parse(text)
-          root.searchResults = found
-          root.searchHint = found.length === 0 ? "no matches" : ""
+          found = JSON.parse(text)
         } catch (error) {
           root.searchResults = []
           root.searchHint = "search failed"
+          return
         }
+        root.searchResults = found
+        root.searchHint = found.length === 0 ? "no matches" : ""
       }
     }
 
@@ -628,7 +630,9 @@ Item {
           Card {
             id: warnings
             width: parent.width
-            visible: root.view !== null && root.view.alerts && root.view.alerts.length > 0
+            // Defensive about a payload from an older binary: no field means no warnings,
+            // rather than a TypeError that takes the whole window down.
+            visible: (root.view && root.view.alerts ? root.view.alerts.length > 0 : false)
             // The theme's urgent role, tinted, so a warning reads as one at a glance.
             color: Model.withAlpha(root.urgent, 0.14)
             borderSpec: Border.surfaceSpec("popups", "border", root.urgent, Math.max(1, Style.space(1)))
@@ -640,9 +644,8 @@ Item {
               Text {
                 id: alertsHeading
                 text: {
-                  if (!root.view) return ""
-                  var count = root.view.alerts.length
-                  return count === 1 ? "1 warning in force" : count + " warnings in force"
+                  var alerts = (root.view && root.view.alerts) ? root.view.alerts : []
+                  return alerts.length === 1 ? "1 warning in force" : alerts.length + " warnings in force"
                 }
                 color: root.foreground
                 font.family: Style.font.family

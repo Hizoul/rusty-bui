@@ -7,7 +7,14 @@ real payloads the binary produces, and writes PNGs to `test/render/out/`.
 ```bash
 container/render-qml.sh /path/to/omarchy-checkout        # dry: nothing falling in the window
 container/render-qml.sh /path/to/omarchy-checkout wet    # rain in about 20 minutes
+container/render-qml.sh /path/to/omarchy-checkout alerts  # warnings in force
 ```
+
+Three drivers run against whichever case is asked for: `App.qml` (the window), `AppSettings.qml`
+(the same window with its settings open, grabbing with a `settings-` prefix so the two images
+stay apart) and `Pill.qml` (the bar pill and the popout it opens). The fixtures come from
+`test/fixtures/`, and the bar and app payloads have synthetic variants for states a quiet day
+cannot show (`make-bar-wet.py`, `make-app-alerts.py`).
 
 It needs an Omarchy checkout for two reasons: `shell/Commons/{Color,Style,Border,Util}.qml`
 are copied in as the theme singletons — so the render is themed by the code that themes the

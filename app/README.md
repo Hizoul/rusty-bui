@@ -21,6 +21,8 @@ Card.qml        (shared, from qml/) the themed surface each block sits on
 One payload — `rustybui app` — drives every block, so the window costs one process spawn
 and one round of cache-aware requests:
 
+- **Warnings** — the CAP messages DWD has in force, worst first, tinted with the theme's
+  urgent role. Only there when there is something to say.
 - **Now** — temperature, conditions, feels-like, and a six-cell grid (wind, humidity,
   pressure, cloud cover, UV, rain).
 - **Rain nowcast** — the same `NowcastChart.qml` the bar popout draws: one bar per radar
@@ -35,6 +37,22 @@ and one round of cache-aware requests:
 `R` or `F5` refreshes, `Esc` closes.
 
 ## Settings
+
+The window's own settings — the location it shows, the clock, how many hours, offline — are
+stored by the binary, in the same file the CLI reads and writes:
+
+```bash
+rustybui prefs                  # read them
+rustybui prefs --clock 12h      # …or change one
+rustybui prefs --json           # what a front-end reads, including which ones are set
+```
+
+They can equally be changed from inside the window (the **Settings** affordance in the
+masthead), which is the point: searching for a place, storing it and switching the clock all
+go through `set-location` and `prefs`, so the window and the command line can never disagree.
+The plugin's own `settings` — `binaryPath`, `refreshMinutes` — come from Omarchy and act as
+defaults for anything the user has not chosen here.
+
 
 Defaults live in `manifest.json`; override them inline in `~/.config/omarchy/shell.json`
 under the plugin's `plugins[]` entry:
@@ -63,7 +81,13 @@ Attribution is rendered in the footer; all three sources are CC BY 4.0.
 ```bash
 node test/model.test.mjs                          # payload and label logic, no shell needed
 container/check-qml.sh /path/to/omarchy-checkout  # manifest + QML against the real shell
+container/render-qml.sh /path/to/omarchy-checkout # render it offscreen; PNGs in test/render/out
 ```
+
+`render-qml.sh` takes an optional payload case: `dry` (nothing falling), `wet` (rain in
+about 20 minutes) or `alerts` (warnings in force). It renders three views — the window, the
+window with its settings open, and the bar pill plus popout — and `test/render/png-stats.py`
+fails if an image comes out blank.
 
 `qmllint` cannot resolve `Quickshell` in the build container, so a stub stands in for it;
 without that stub the `KeyboardPanel`-style entry points report spurious

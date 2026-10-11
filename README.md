@@ -91,11 +91,13 @@ rustybui set-location "Leiden" --lat 52.16 --lon 4.49 --country NL --timezone Eu
 rustybui nowcast                 # human-readable table (+ where each answer came from)
 rustybui nowcast --json          # the camelCase view contract the QML consumes
 rustybui bar                     # Waybar-style JSON for the Omarchy bar: text/class/tooltip
-rustybui app                    # one payload for a whole screen: nowcast + forecast + air
-rustybui app --text             # …or a short human summary of the same payload
+rustybui app                     # one payload for a whole screen: warnings + nowcast + forecast + air
+rustybui app --text              # …or a short human summary of the same payload
 rustybui forecast --hours 12 --days 3
+rustybui alerts                  # warnings in force, worst first
 rustybui air
 rustybui search Amersfoort
+rustybui prefs                   # read or change what the window shows: clock, hours, offline
 rustybui cache [--clear]         # report or clear the caches
 ```
 
@@ -119,6 +121,22 @@ that crosses a cycle costs at most 24 KNMI point queries, five seconds apart at 
 pace, and never a burst.
 
 ## Data sources and attribution
+
+Three providers, as ported, and each one is asked for what it reports on rather than as a
+uniform backend:
+
+| | nowcast (next 2 h) | forecast | warnings |
+|---|---|---|---|
+| **KNMI** (NL radar) | preferred inside the Netherlands | — | — (keyed dataset only) |
+| **DWD** (Bright Sky) | preferred elsewhere | preferred inside Germany | the CAP messages, keylessly |
+| **Open-Meteo** | model fallback, and everywhere radars do not reach | preferred everywhere else | — |
+
+Whichever provider fails falls back to the next, and the payload says who answered. DWD's
+radar, forecast and warnings share one politeness gate and one set of counters.
+
+Warnings are DWD's, which is what a keyless source offers: KNMI publishes Dutch warnings only
+through a keyed dataset on the KNMI Data Platform, so the Netherlands shows no warnings rather
+than an invented one. Attribution (CC BY 4.0) is in every payload a front-end renders.
 
 | Provider   | Used for                        | Licence |
 |------------|---------------------------------|---------|
