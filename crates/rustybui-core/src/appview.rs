@@ -13,7 +13,7 @@ use crate::nowcast::RainNowcast;
 use crate::providers::openmeteo::AirQuality;
 use crate::providers::ForecastProvider;
 use crate::view::{LocationView, NowcastView};
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, Datelike, FixedOffset, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 
 /// WMO weather interpretation codes, as Open-Meteo and Bright Sky both report
@@ -65,24 +65,18 @@ pub fn wind_compass(degrees: f64) -> &'static str {
     POINTS[index]
 }
 
-fn temperature(value: Option<f64>) -> Option<String> {
-    value.map(|c| format!("{c:.1}°"))
+/// `14.2°`, or `57.6°F` — the label and its unit are built together in `units`, so a preference
+/// cannot be applied to one and forgotten on the other.
+fn temperature(value: Option<f64>, imperial: bool) -> Option<String> {
+    value.map(|celsius| crate::units::format_temperature(celsius, imperial))
 }
 
 fn millimetres(value: f64, imperial: bool) -> String {
-    if imperial {
-        format!("{:.3} in", value / 25.4)
-    } else {
-        format!("{value:.2} mm")
-    }
+    crate::units::format_millimetres(value, imperial)
 }
 
 fn speed(value: f64, imperial: bool) -> String {
-    if imperial {
-        format!("{:.1} mph", value * 0.621_371)
-    } else {
-        format!("{value:.1} km/h")
-    }
+    crate::units::format_speed(value, imperial)
 }
 
 fn clock(time: DateTime<FixedOffset>, clock24: bool) -> String {
@@ -168,12 +162,13 @@ pub struct ForecastView {
 impl ForecastView {
     /// `hours` hourly rows from the first sample at or after `now`.
     pub fn new(
-        forecast: &Forecast,
-        now: DateTime<Utc>,
-        hours: usize,
-        imperial: bool,
-        clock24: bool,
-    ) -> Self {
+     forecast: &Forecast,
+     location: &Location,
+     now: DateTime<Utc>,
+     hours: usize,
+     imperial: bool,
+     clock24: bool,
+ ) -> Self {
         let offset = FixedOffset::east_opt(forecast.utc_offset_seconds as i32)
             .unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
 
@@ -182,13 +177,13 @@ impl ForecastView {
             .iter()
             .filter(|sample| sample.time + chrono::Duration::hours(1) > now)
             .take(hours)
-            .map(|sample| hourly_view(sample, offset, imperial, clock24))
+            .map(|sample| hourly_view(sample, location, offset, imperial, clock24))
             .collect();
 
         let daily = forecast
             .daily
             .iter()
-            .map(|day_forecast| daily_view(day_forecast, offset, imperial, clock24))
+            .map(|day_forecast| daily_view(day_forecast, location, offset, imperial, clock24))
             .collect();
 
         Self {
@@ -221,10 +216,10 @@ fn current_view(
             .time
             .map(|time| clock(time.with_timezone(&offset), clock24)),
         temperature_c: current.temperature_c,
-        temperature_label: temperature(current.temperature_c),
+        temperature_label: temperature(current.temperature_c, imperial),
         feels_like_label: current
             .apparent_temperature_c
-            .map(|value| format!("feels {value:.1}°")),
+            .map(|value| format!("feels {}", crate::units::format_temperature(value, imperial))),
         condition_label: current
             .weather_code
             .map_or("—", condition_label)
@@ -246,7 +241,7 @@ fn current_view(
             .map(|value| format!("{value:.0}%")),
         pressure_label: current
             .pressure_msl_hpa
-            .map(|value| format!("{value:.0} hPa")),
+            .map(|value| crate::units::format_pressure(value, imperial)),
         uv_label: current.uv_index.map(|value| format!("{value:.1}")),
         cloud_cover_pct: current.cloud_cover_pct,
         precipitation_mm: current.precipitation_mm,
@@ -260,6 +255,7 @@ fn current_view(
 
 fn hourly_view(
     sample: &HourlyForecast,
+    location: &Location,
     offset: FixedOffset,
     imperial: bool,
     clock24: bool,
@@ -269,7 +265,7 @@ fn hourly_view(
         time_ms: sample.time.timestamp_millis(),
         clock_label: clock(local, clock24),
         temperature_c: sample.temperature_c,
-        temperature_label: temperature(sample.temperature_c),
+        temperature_label: temperature(sample.temperature_c, imperial),
         condition_label: sample.weather_code.map_or("—", condition_label).to_string(),
         weather_code: sample.weather_code,
         precipitation_mm: sample.precipitation_mm,
@@ -281,27 +277,50 @@ fn hourly_view(
             .precipitation_probability_pct
             .map(|value| format!("{value:.0}%")),
         wind_label: sample.wind_speed_kmh.map(|value| speed(value, imperial)),
-        is_daylight: {
-            // The provider only gives sunrise/sunset per day, so use the hour.
-            let hour = local.format("%H").to_string().parse::<u32>().unwrap_or(12);
-            (7..19).contains(&hour)
-        },
+        is_daylight: daylight_at(sample.time, location),
+    }
+}
+
+/// Whether the sun is up at `at`, from the arithmetic rather than from a provider's flag: a
+/// glyph that only knew 07:00–19:00 would draw a sunset in Berlin in June at nine in the evening
+/// as if it were night.
+fn daylight_at(at: DateTime<Utc>, location: &Location) -> bool {
+    let date = at.date_naive();
+    match crate::solar::times_on(date, location.latitude, location.longitude) {
+        Some(times) => at >= times.sunrise && at < times.sunset,
+        // A polar day has no sunset to be before and a polar night no sunrise to be after;
+        // the clock is the only thing left to go on, and the two cases differ by season.
+        None => {
+            // No crossing of the horizon at all: either the sun never sets or it never rises.
+            // Which one follows from the hemisphere and the season, and inside a polar day the
+            // clock is all there is left to go on. Nobody this app maps lives up here; the
+            // honesty is in not inventing a sunrise that does not exist.
+            let polar_day = (location.latitude > 0.0) == (3..=9).contains(&date.month());
+            polar_day && (7..=19).contains(&at.hour())
+        }
     }
 }
 
 fn daily_view(
     day_forecast: &DailyForecast,
+    location: &Location,
     offset: FixedOffset,
     imperial: bool,
     clock24: bool,
 ) -> DailyView {
     let local = day_forecast.time.with_timezone(&offset);
+    // The day's own sun times, computed when the provider's are missing: Bright Sky publishes
+    // none, and a daily row with a blank sunrise is worse than one that worked it out.
+    let computed = chrono::NaiveDate::parse_from_str(&day_forecast.date, "%Y-%m-%d")
+        .ok()
+        .and_then(|date| crate::solar::times_on(date, location.latitude, location.longitude));
+
     DailyView {
         time_ms: day_forecast.time.timestamp_millis(),
         date: day_forecast.date.clone(),
         day_label: day(local),
-        high_label: temperature(day_forecast.temperature_max_c),
-        low_label: temperature(day_forecast.temperature_min_c),
+        high_label: temperature(day_forecast.temperature_max_c, imperial),
+        low_label: temperature(day_forecast.temperature_min_c, imperial),
         high_c: day_forecast.temperature_max_c,
         low_c: day_forecast.temperature_min_c,
         condition_label: day_forecast
@@ -316,10 +335,173 @@ fn daily_view(
         uv_label: day_forecast.uv_index_max.map(|value| format!("{value:.1}")),
         sunrise_label: day_forecast
             .sunrise
+            .or_else(|| computed.map(|times| times.sunrise))
             .map(|time| clock(time.with_timezone(&offset), clock24)),
         sunset_label: day_forecast
             .sunset
+            .or_else(|| computed.map(|times| times.sunset))
             .map(|time| clock(time.with_timezone(&offset), clock24)),
+    }
+}
+
+/// One day of forecast, opened up: what a daily row in the window's list expands into.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DayView {
+    pub location: LocationView,
+    /// `2026-10-15` — the day that was asked for.
+    pub date: String,
+    /// `Thu 15 Oct`, in the location's own calendar, taken from the day row when there is one.
+    pub day_label: String,
+    pub timezone: String,
+    /// That day's row in the daily list: its high and low, its rain, its sun.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub day: Option<DailyView>,
+    /// One row per hour of that day, in the location's own clock.
+    pub hours: Vec<HourlyView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forecast_attribution: Option<String>,
+}
+
+impl DayView {
+    pub fn build(
+        location: &Location,
+        forecast: &Forecast,
+        date: chrono::NaiveDate,
+        provider: ForecastProvider,
+        imperial: bool,
+        clock24: bool,
+    ) -> Self {
+        let offset = FixedOffset::east_opt(forecast.utc_offset_seconds as i32)
+            .unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+        let wanted = date.format("%Y-%m-%d").to_string();
+
+        let day = forecast
+            .daily
+            .iter()
+            .find(|day| day.date == wanted)
+            .or_else(|| forecast.daily.first())
+            .map(|day| daily_view(day, location, offset, imperial, clock24));
+
+        // The hours are filtered to the day as well as asked for it: a provider that answers
+        // with a range either side of the date would otherwise put two midnights in one list.
+        let hours: Vec<HourlyView> = forecast
+            .hourly
+            .iter()
+            .filter(|sample| sample.time.with_timezone(&offset).date_naive() == date)
+            .map(|sample| hourly_view(sample, location, offset, imperial, clock24))
+            .collect();
+
+        Self {
+            location: LocationView::from(location),
+            date: wanted,
+            day_label: day
+                .as_ref()
+                .map(|day| day.day_label.clone())
+                .unwrap_or_else(|| date.format("%a %-d %b").to_string()),
+            timezone: forecast.timezone.clone(),
+            day,
+            hours,
+            forecast_attribution: Some(provider.attribution().to_string()),
+        }
+    }
+}
+
+/// The sun and the moon for today: when the light goes, and what the moon is doing.
+///
+/// The moon is computed, not fetched — none of the three providers publishes it — and it is
+/// phase and illumination only. Moonrise and moonset would need an ephemeris per place, and
+/// half a feature beats an invented one.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkyView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sunrise_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sunset_label: Option<String>,
+    /// `10h 57m`, or nothing when the provider gave no times.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub daylight_label: Option<String>,
+    /// How far through today's daylight it is: 0 at sunrise, 1 at sunset. Absent at night, so
+    /// a bar can be shown only while it means something.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub daylight_progress: Option<f64>,
+    /// `sets in 3h 20m`, or `rises in 9h 10m` before dawn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sun_event_label: Option<String>,
+    pub is_daylight: bool,
+    /// `new`, `waxing-crescent`, … for a front-end to draw its own disc and pick its own glyph.
+    pub moon_phase: String,
+    pub moon_phase_label: String,
+    /// 0–1 of the disc that the sun is lighting.
+    pub moon_illumination: f64,
+    pub moon_label: String,
+    pub moon_waxing: bool,
+}
+
+impl SkyView {
+    fn new(
+        day: Option<&DailyForecast>,
+        location: &Location,
+        now: DateTime<Utc>,
+        offset: FixedOffset,
+        clock24: bool,
+    ) -> Self {
+        // The provider's own times where it has them; the arithmetic where it does not, which is
+        // every DWD day.
+        let computed = day
+            .and_then(|day| chrono::NaiveDate::parse_from_str(&day.date, "%Y-%m-%d").ok())
+            .and_then(|date| crate::solar::times_on(date, location.latitude, location.longitude));
+        let sunrise = day.and_then(|day| day.sunrise).or_else(|| computed.map(|times| times.sunrise));
+        let sunset = day.and_then(|day| day.sunset).or_else(|| computed.map(|times| times.sunset));
+        let moon = crate::moon::phase_at(now);
+
+        let daylight = match (sunrise, sunset) {
+            (Some(rise), Some(set)) if set > rise => Some(set - rise),
+            _ => day
+                .and_then(|day| day.daylight_seconds)
+                .map(|seconds| chrono::Duration::seconds(seconds as i64)),
+        };
+
+        // The sun is up when it is between the two, which is the only thing the times can tell
+        // us — a provider's own `is_day` is for the hour it was observed, not for now.
+        let is_daylight = matches!((sunrise, sunset), (Some(rise), Some(set)) if now >= rise && now < set);
+        let daylight_progress = match (sunrise, sunset) {
+            (Some(rise), Some(set)) if set > rise && now >= rise && now < set => {
+                Some((now - rise).num_seconds() as f64 / (set - rise).num_seconds() as f64)
+            }
+            _ => None,
+        };
+        let sun_event_label = match (sunrise, sunset) {
+            (Some(rise), _) if now < rise => Some(format!("rises in {}", duration_words(rise - now))),
+            (_, Some(set)) if now < set => Some(format!("sets in {}", duration_words(set - now))),
+            _ => None,
+        };
+
+        Self {
+            sunrise_label: sunrise.map(|time| clock(time.with_timezone(&offset), clock24)),
+            sunset_label: sunset.map(|time| clock(time.with_timezone(&offset), clock24)),
+            daylight_label: daylight.map(|span| duration_words(span)),
+            daylight_progress,
+            sun_event_label,
+            is_daylight,
+            moon_phase: moon.phase_name.key().to_string(),
+            moon_phase_label: moon.phase_name.label().to_string(),
+            moon_illumination: moon.illumination,
+            moon_label: moon.illumination_label(),
+            moon_waxing: moon.waxing,
+        }
+    }
+}
+
+/// `3h 20m`, `12m` — a wait, in the words a person would use for it.
+fn duration_words(span: chrono::Duration) -> String {
+    let minutes = span.num_minutes().max(0);
+    let (hours, minutes) = (minutes / 60, minutes % 60);
+    if hours == 0 {
+        format!("{minutes}m")
+    } else {
+        format!("{hours}h {minutes:02}m")
     }
 }
 
@@ -417,6 +599,9 @@ pub struct AppView {
     pub forecast_attribution: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub air: Option<AirQualityView>,
+    /// The sun and the moon, which come from the forecast's first day and from arithmetic.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sky: Option<SkyView>,
     /// Anything that failed, so a screen can say so instead of showing gaps.
     pub errors: Vec<String>,
 }
@@ -461,14 +646,17 @@ impl AppView {
                 .collect(),
             nowcast: parts
                 .nowcast
-                .map(|nowcast| NowcastView::new(location, nowcast, now)),
+                .map(|nowcast| NowcastView::new(location, nowcast, now, imperial)),
             forecast: parts
                 .forecast
-                .map(|forecast| ForecastView::new(forecast, now, hours, imperial, clock24)),
+                .map(|forecast| ForecastView::new(forecast, location, now, hours, imperial, clock24)),
             forecast_attribution: parts
                 .forecast_provider
                 .map(|provider| provider.attribution().to_string()),
             air: parts.air.map(AirQualityView::from),
+            sky: parts.forecast.map(|forecast| {
+                SkyView::new(forecast.daily.first(), location, now, offset, clock24)
+            }),
             errors: parts.errors,
         }
     }
@@ -556,6 +744,7 @@ mod tests {
     fn current_block_carries_labels_not_raw_numbers_alone() {
         let view = ForecastView::new(
             &forecast(),
+            &Location::new("Leiden", 52.16, 4.49),
             Utc.with_ymd_and_hms(2025, 10, 11, 15, 0, 0).unwrap(),
             12,
             false,
@@ -577,6 +766,7 @@ mod tests {
         // Imperial, when the config asks for it.
         let imperial = ForecastView::new(
             &forecast(),
+            &Location::new("Leiden", 52.16, 4.49),
             Utc.with_ymd_and_hms(2025, 10, 11, 15, 0, 0).unwrap(),
             12,
             true,
@@ -584,12 +774,31 @@ mod tests {
         );
         let current = imperial.current.as_ref().unwrap();
         assert_eq!(current.wind_label.as_deref(), Some("11.4 mph SSW"));
+        assert_eq!(current.temperature_label.as_deref(), Some("57.6°F"));
+        assert_eq!(current.feels_like_label.as_deref(), Some("feels 55.6°F"));
+        assert_eq!(current.pressure_label.as_deref(), Some("29.90 inHg"));
+        assert_eq!(current.precipitation_label.as_deref(), Some("0.012 in"));
+
+        // The hourly strip and the day rows carry temperatures too, and they are built by
+        // different functions — the ones that quietly stayed metric while the current block
+        // converted.
+        let hourly = ForecastView::new(
+            &forecast(),
+            &Location::new("Leiden", 52.16, 4.49),
+            Utc.with_ymd_and_hms(2025, 10, 11, 15, 0, 0).unwrap(),
+            12,
+            true,
+            true,
+        );
+        assert_eq!(hourly.hourly[0].temperature_label.as_deref(), Some("58.3°F"));
+        assert_eq!(hourly.daily[0].high_label.as_deref(), Some("59.2°F"));
+        assert_eq!(hourly.daily[0].low_label.as_deref(), Some("48.6°F"));
     }
 
     #[test]
     fn hourly_and_daily_rows_are_clocked_in_the_locations_own_offset() {
         let now = Utc.with_ymd_and_hms(2025, 10, 11, 15, 0, 0).unwrap();
-        let view = ForecastView::new(&forecast(), now, 12, false, true);
+        let view = ForecastView::new(&forecast(), &Location::new("Leiden", 52.16, 4.49), now, 12, false, true);
 
         // 1760191200 = 2025-10-11T14:00:00Z, which the +02:00 offset reads as 16:00,
         // and the window starts at 15:00Z — so only the later sample survives.
@@ -607,6 +816,85 @@ mod tests {
         assert_eq!(today.condition_label, "Light rain");
         // 1760201460 = 2025-10-11T16:51:00Z = 18:51 local.
         assert_eq!(today.sunset_label.as_deref(), Some("18:51"));
+    }
+
+    #[test]
+    fn a_day_view_opens_one_day_of_the_forecast() {
+        let location = Location::new("Leiden", 52.16, 4.49);
+        let forecast = forecast();
+        let date = chrono::NaiveDate::from_ymd_opt(2025, 10, 11).unwrap();
+
+        let view = DayView::build(&location, &forecast, date, ForecastProvider::OpenMeteo, false, true);
+
+        assert_eq!(view.date, "2025-10-11");
+        assert_eq!(view.day_label, "Sat 11 Oct");
+        assert_eq!(view.timezone, "Europe/Amsterdam");
+        // The fixture's day carries the provider's own sunrise and sunset, which the detail
+        // keeps rather than recomputing.
+        let day = view.day.as_ref().expect("the day row");
+        assert_eq!(day.sunrise_label.as_deref(), Some("07:50"));
+        assert_eq!(day.sunset_label.as_deref(), Some("18:51"));
+        // And the hours are the ones that fall on that date, in the location's clock.
+        assert_eq!(view.hours.len(), 2);
+        assert_eq!(view.hours[0].clock_label, "16:00");
+        assert_eq!(view.hours[0].temperature_label.as_deref(), Some("14.2°"));
+        assert_eq!(view.hours[1].clock_label, "17:00");
+
+        // A day the provider has nothing for still answers: the rows are empty rather than
+        // wrong, and the label falls back to the date itself.
+        let far = DayView::build(
+            &location,
+            &forecast,
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 3).unwrap(),
+            ForecastProvider::OpenMeteo,
+            false,
+            true,
+        );
+        assert!(far.hours.is_empty());
+        assert_eq!(far.date, "2026-03-03");
+    }
+
+    #[test]
+    fn the_sky_block_reads_the_day_and_the_clock_off_the_forecast() {
+        let now = Utc.with_ymd_and_hms(2025, 10, 11, 15, 0, 0).unwrap();
+        let forecast = forecast();
+        let leiden = Location::new("Leiden", 52.16, 4.49);
+        let sky = SkyView::new(forecast.daily.first(), &leiden, now, FixedOffset::east_opt(7200).unwrap(), true);
+
+        // 1760161800 = 05:50Z sunrise, 1760201460 = 16:51Z sunset, read in +02:00.
+        assert_eq!(sky.sunrise_label.as_deref(), Some("07:50"));
+        assert_eq!(sky.sunset_label.as_deref(), Some("18:51"));
+        assert_eq!(sky.daylight_label.as_deref(), Some("11h 01m"));
+        // 15:00Z is 9h10m into an 11h01m day.
+        assert_eq!(sky.daylight_progress.map(|value| (value * 100.0).round()), Some(83.0));
+        assert!(sky.is_daylight);
+        assert_eq!(sky.sun_event_label.as_deref(), Some("sets in 1h 51m"));
+
+        // And the moon: computed here rather than fetched, and labelled for a disc to be drawn.
+        assert!(sky.moon_phase.contains('-') || sky.moon_phase == "new" || sky.moon_phase == "full");
+        assert!(!sky.moon_phase_label.is_empty());
+        assert!((0.0..=1.0).contains(&sky.moon_illumination));
+        assert!(sky.moon_label.ends_with("lit"));
+
+        // At night the bar has nothing to say, and the sun's next event is tomorrow's sunrise —
+        // which this block does not know, so it says nothing rather than guessing.
+        let night = SkyView::new(
+            forecast.daily.first(),
+            &leiden,
+            Utc.with_ymd_and_hms(2025, 10, 11, 20, 0, 0).unwrap(),
+            FixedOffset::east_opt(7200).unwrap(),
+            true,
+        );
+        assert!(!night.is_daylight);
+        assert_eq!(night.daylight_progress, None);
+        assert_eq!(night.sun_event_label, None);
+        assert_eq!(night.daylight_label.as_deref(), Some("11h 01m"));
+
+        // A provider that gives no times at all still yields the moon, and no invention.
+        let bare = SkyView::new(None, &leiden, now, FixedOffset::east_opt(0).unwrap(), true);
+        assert_eq!(bare.sunrise_label, None);
+        assert!(!bare.is_daylight);
+        assert!(!bare.moon_phase.is_empty());
     }
 
     #[test]

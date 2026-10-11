@@ -26,9 +26,12 @@ cp -L "$root/omarchy/manifest.json" "$root/omarchy/Pill.qml" "$root/omarchy/Rain
   "$dest/mmb.rainnowcast/"
 cp -L "$root/qml/Model.js" "$root/qml/NowcastChart.qml" "$dest/mmb.rainnowcast/"
 
-# The standalone window.
+# The standalone window, and the map it carries.
 cp -L "$root/app/manifest.json" "$root/app/App.qml" "$dest/mmb.weather/"
-cp -L "$root/qml/Model.js" "$root/qml/NowcastChart.qml" "$root/qml/Card.qml" "$dest/mmb.weather/"
+cp -L "$root/qml/Model.js" "$root/qml/NowcastChart.qml" "$root/qml/Card.qml" \
+  "$root/qml/RadarMap.qml" "$root/qml/Basemap.js" "$root/qml/MoonDisc.qml" \
+  "$root/qml/HourStrip.qml" \
+  "$dest/mmb.weather/"
 
 if [[ -n $(find "$dest" -type l -print -quit) ]]; then
   echo "staging left a symlink behind; Omarchy will reject that plugin" >&2

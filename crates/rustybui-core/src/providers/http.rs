@@ -138,6 +138,56 @@ impl HttpClient {
         self.provider
     }
 
+    /// GET `url` and return the body as bytes, honouring the politeness gate.
+    ///
+    /// Binary payloads (map images) are cached by their caller instead: it knows what makes
+    /// two of them the same — a bounding box, a size and a radar frame — which a URL-keyed
+    /// text cache does not, and it can keep serving the last good one while the service is
+    /// having a bad day.
+    pub async fn get_bytes(
+        &self,
+        url: &str,
+        query: &[(&str, String)],
+        header: Option<(&str, &str)>,
+    ) -> ProviderResult<Vec<u8>> {
+        if self.cache.is_offline() {
+            return Err(ProviderError::Unavailable {
+                provider: self.provider,
+                reason: "offline, and images are not kept in the response cache".to_string(),
+            });
+        }
+
+        self.wait_for_slot().await;
+
+        let mut request = self.http.get(url).query(query);
+        if let Some((name, value)) = header {
+            request = request.header(name, value);
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|source| ProviderError::Http { provider: self.provider, source })?;
+        let status = response.status();
+        let body = response
+            .bytes()
+            .await
+            .map_err(|source| ProviderError::Http { provider: self.provider, source })?
+            .to_vec();
+
+        if !status.is_success() {
+            let preview = String::from_utf8_lossy(&body).chars().take(160).collect::<String>();
+            provider_log!("{}: HTTP {status} for {} — {preview}", self.provider, short_url(url));
+            return Err(ProviderError::Unavailable {
+                provider: self.provider,
+                reason: format!("HTTP {status}: {preview}"),
+            });
+        }
+
+        self.stats.record(Source::Network);
+        Ok(body)
+    }
+
     /// GET `url` with `query`, honouring the cache and the politeness gate.
     ///
     /// `fresh_for` is how long a cached response may be reused without asking the

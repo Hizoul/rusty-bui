@@ -14,6 +14,7 @@ Item {
   property var command: []
   property bool running: false
   property var stdout: null
+  property var stderr: null
   property int exitCode: 0
 
   signal exited(int exitCode)
@@ -31,6 +32,8 @@ Item {
   function payloadFor() {
     if (joinedCommand.indexOf("prefs") !== -1) return Fixture.prefs
     if (joinedCommand.indexOf("search") !== -1) return Fixture.search
+    if (joinedCommand.indexOf("radar") !== -1) return Fixture.radar
+    if (joinedCommand.indexOf(" day") !== -1) return Fixture.day
     if (joinedCommand.indexOf("app") !== -1) return Fixture.app
     if (joinedCommand.indexOf("bar") !== -1) return Fixture.bar
     return null

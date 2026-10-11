@@ -12,8 +12,12 @@ process — no second Quickshell instance, and it inherits the active theme for 
 
 ```
 manifest.json   plugin contract: one panel, kept loaded between summons
-App.qml         the window: masthead, now, rain nowcast, hours, days, air
+App.qml         the window: masthead, now, sun and moon, rain nowcast, map, hours, days, air
 Card.qml        (shared, from qml/) the themed surface each block sits on
+HourStrip.qml   (shared, from qml/) a row of hours — the one card the day detail shares
+RadarMap.qml    (shared, from qml/) the pannable, zoomable radar map
+MoonDisc.qml    (shared, from qml/) the moon, drawn from two arcs
+Basemap.js      (generated) Natural Earth coastlines and borders, projected at runtime
 ```
 
 ## What it shows
@@ -25,11 +29,21 @@ and one round of cache-aware requests:
   urgent role. Only there when there is something to say.
 - **Now** — temperature, conditions, feels-like, and a six-cell grid (wind, humidity,
   pressure, cloud cover, UV, rain).
+- **Sun and moon** — sunrise to sunset, how long the light lasts, how much of it is left, and
+  the moon: its phase drawn as a disc, not looked up in a font, with the lit fraction beside it.
+  The sun's times are the provider's where it has them and computed where it does not (every
+  DWD day); the moon is always computed.
 - **Rain nowcast** — the same `NowcastChart.qml` the bar popout draws: one bar per radar
   frame, hour ticks, a now marker, mm/h axis, plus the sentence and the status line.
+- **Rain map** — DWD's radar composite over a vendored coastline, drag to move it, wheel to
+  zoom, and a stepper that walks the frames from an hour back to the end of the nowcast.
 - **Next hours** — a scrollable strip with the glyph, temperature and precipitation
-  probability per hour.
-- **Days** — up to seven rows with the day's glyph, rain, UV and low/high.
+  probability per hour. Day and night glyphs come from the computed sun times, not a clock
+  window.
+- **Days** — up to seven rows with the day's glyph, rain, UV and low/high. Clicking a row opens
+  that day up: its own figures, then its own 24 hours, in the card below the list. Clicking it
+  again — or **Close** — puts it away. Opening a day moves the window to it, because a row near
+  the end of the list opens a card that starts below the window.
 - **Air quality** — the European AQI band, coloured from the theme, with PM2.5 and PM10.
 - **Provenance and failures** — the CC BY 4.0 attribution, and any part that failed
   (`rustybui` reports per-source errors rather than hiding a block).
@@ -53,6 +67,25 @@ go through `set-location` and `prefs`, so the window and the command line can ne
 The plugin's own `settings` — `binaryPath`, `refreshMinutes` — come from Omarchy and act as
 defaults for anything the user has not chosen here.
 
+## Saved places
+
+The settings card carries a **Places** row: one chip per saved place, the current one outlined,
+and a `+ Save <place>` chip for the place being shown. Clicking a chip switches to it; the `×`
+on a chip forgets it. Underneath, the same list is the CLI's:
+
+```bash
+rustybui places                 # list them, » marking the one being shown
+rustybui places --add           # save the stored location
+rustybui places --use berlin    # switch to a saved place, case-insensitively
+rustybui places --remove Berlin # forget one
+rustybui places --json          # { places: [...], limit, location }
+```
+
+Places are matched by name, and a place arriving twice replaces the one already saved rather
+than doubling it. Twelve is the limit, and going past it is refused by name rather than
+enforced by quietly dropping one. Forgetting a place from the window has no undo — deliberate,
+but it is why the × is a small target on the right of the chip and not the chip itself.
+
 
 Defaults live in `manifest.json`; override them inline in `~/.config/omarchy/shell.json`
 under the plugin's `plugins[]` entry:
@@ -68,6 +101,21 @@ under the plugin's `plugins[]` entry:
 | `hours` | `24` | Hourly rows to fetch |
 | `clock24` | `true` | 12-hour clock when false |
 | `offline` | `false` | Never touch the network; use the last cached fetch |
+
+## One day, opened up
+
+Clicking a row in the day list asks the binary for that one day and shows its hours underneath:
+
+```bash
+rustybui day                    # today, as the JSON the window renders
+rustybui day --date 2026-10-12  # a particular day
+rustybui day --date 2026-10-12 --text   # …and a table to read in a terminal
+```
+
+It is the same provider choice as the forecast — DWD inside Germany, Open-Meteo elsewhere, each
+falling back to the other — asked for a single date. A day that has already happened is kept for
+a day rather than re-fetched every time the row is reopened; today's is asked for again. The
+window's day card and the CLI's `day` print the same payload, so the two cannot drift.
 
 ## Where the data comes from
 

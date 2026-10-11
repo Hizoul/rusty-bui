@@ -109,7 +109,12 @@ pub struct NowcastView {
 }
 
 impl NowcastView {
-    pub fn new(location: &Location, nowcast: &RainNowcast, now: DateTime<Utc>) -> Self {
+    pub fn new(
+        location: &Location,
+        nowcast: &RainNowcast,
+        now: DateTime<Utc>,
+        imperial: bool,
+    ) -> Self {
         let summary = nowcast.summary(now);
         let current_time = nowcast.point_at(now).map(|point| point.time);
 
@@ -137,7 +142,7 @@ impl NowcastView {
             now_ms: now.timestamp_millis(),
             summary: SummaryView {
                 is_raining_now: summary.is_raining_now,
-                pill: summary.pill_text(),
+                pill: summary.pill_text(imperial),
                 current_mm_per_hour: summary.current_mm_per_hour,
                 current_class: summary.current_class,
                 current_label: summary.current_class.label().to_string(),
@@ -213,7 +218,7 @@ mod tests {
             NowcastProvider::Knmi,
             true,
         );
-        NowcastView::new(&Location::new("Leiden", 52.16, 4.49), &nowcast, now)
+        NowcastView::new(&Location::new("Leiden", 52.16, 4.49), &nowcast, now, false)
     }
 
     #[test]

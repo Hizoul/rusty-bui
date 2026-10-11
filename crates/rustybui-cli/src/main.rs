@@ -5,12 +5,13 @@
 mod config;
 
 use anyhow::{bail, Context, Result};
-use chrono::{FixedOffset, Local, Utc};
+use chrono::{DateTime, FixedOffset, Local, NaiveDate, Utc};
 use clap::{Args, Parser, Subcommand};
 use config::Config;
 use rustybui_core::{
-    format_intensity, AppParts, AppView, DiskCache, Forecast, ForecastView, Location,
-    NowcastService, NowcastView, OpenMeteoClient, ResponseCache,
+    format_millimetres, format_pressure, format_rate, format_speed, format_temperature, AppParts,
+    AppView, DayView, DiskCache, Forecast, ForecastView, Location, NowcastService, NowcastView,
+    OpenMeteoClient, ResponseCache,
 };
 
 #[derive(Parser)]
@@ -45,8 +46,14 @@ enum Command {
     Bar(BarArgs),
     /// Weather forecast (DWD/Bright Sky or Open-Meteo).
     Forecast(ForecastArgs),
+    /// One day of the forecast, opened up: what a row in the window's day list expands into.
+    Day(DayArgs),
+
     /// Everything one screen needs, in one payload (the app's input).
     App(AppArgs),
+
+    /// Radar imagery for the map: a PNG of DWD's composite, georeferenced by its bounding box.
+    Radar(RadarArgs),
     /// Air quality (European AQI).
     Air(LocationArgs),
 
@@ -58,6 +65,8 @@ enum Command {
     SetLocation(SetLocationArgs),
     /// Read or change what the app window shows: location, clock, hours, units.
     Prefs(PrefsArgs),
+    /// Saved places: the ones you switch between, so coming back does not mean searching again.
+    Places(PlacesArgs),
     /// Print the default location and config path.
     Which,
     /// Report or clear the caches.
@@ -153,6 +162,10 @@ struct PrefsView {
     /// The stored location, so a settings screen can show which place it is editing.
     #[serde(skip_serializing_if = "Option::is_none")]
     location: Option<Location>,
+    /// Saved places, in the order they were saved, for a settings screen to offer as chips.
+    places: Vec<Location>,
+    /// How many there is room for, so the screen can say so rather than let the CLI refuse.
+    place_limit: usize,
 }
 
 #[derive(serde::Serialize)]
@@ -161,6 +174,15 @@ struct StoredPrefs {
     hours: bool,
     offline: bool,
     units: bool,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlacesView {
+    places: Vec<Location>,
+    limit: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    location: Option<Location>,
 }
 
 impl PrefsView {
@@ -177,8 +199,54 @@ impl PrefsView {
                 units: config.units.is_some(),
             },
             location: config.location.clone(),
+            places: config.places.clone(),
+            place_limit: config::MAX_PLACES,
         }
     }
+}
+
+#[derive(Args)]
+struct DayArgs {
+    /// The day to open, `YYYY-MM-DD`. Today when omitted.
+    #[arg(long)]
+    date: Option<String>,
+    #[arg(long)]
+    lat: Option<f64>,
+    #[arg(long)]
+    lon: Option<f64>,
+    #[arg(long)]
+    name: Option<String>,
+    /// `24h` or `12h` for this call; the stored preference when omitted.
+    #[arg(long)]
+    clock: Option<String>,
+    /// Print a short table instead of the payload.
+    #[arg(long)]
+    text: bool,
+}
+
+#[derive(Args)]
+struct RadarArgs {
+    #[arg(long)]
+    lat: Option<f64>,
+    #[arg(long)]
+    lon: Option<f64>,
+    #[arg(long)]
+    name: Option<String>,
+    /// Map view as `minLon,minLat,maxLon,maxLat`; defaults to a box around the location.
+    #[arg(long)]
+    bbox: Option<String>,
+    #[arg(long, default_value_t = 1200)]
+    width: u32,
+    #[arg(long, default_value_t = 800)]
+    height: u32,
+    /// Frame to draw, RFC 3339. The newest frame when omitted.
+    #[arg(long)]
+    time: Option<String>,
+    /// List the frames the composite has instead of fetching an image.
+    #[arg(long)]
+    frames: bool,
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -212,6 +280,22 @@ struct PrefsArgs {
 }
 
 #[derive(Args)]
+struct PlacesArgs {
+    /// Save the stored location as a place to come back to.
+    #[arg(long)]
+    add: bool,
+    /// Forget a saved place.
+    #[arg(long, value_name = "NAME")]
+    remove: Option<String>,
+    /// Make a saved place the stored location.
+    #[arg(long = "use", value_name = "NAME")]
+    use_place: Option<String>,
+    /// Print the saved places as the JSON a front-end reads.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
 struct SetLocationArgs {
     /// Display name for the location.
     name: String,
@@ -229,6 +313,20 @@ struct SetLocationArgs {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // A filter that dies quietly when its reader goes away is what a Unix tool does; panicking
+    // with a backtrace is what Rust does by default. `rustybui which | head -1` should print a
+    // line, not a stack trace — and a front-end that stops reading a stream must not take the
+    // binary down with it.
+    #[cfg(unix)]
+    unsafe {
+        extern "C" {
+            fn signal(signal: i32, handler: usize) -> usize;
+        }
+        const SIGPIPE: i32 = 13;
+        const SIG_DFL: usize = 0;
+        signal(SIGPIPE, SIG_DFL);
+    }
+
     let cli = Cli::parse();
     let config = Config::load();
     let imperial = config.imperial_units();
@@ -243,7 +341,7 @@ async fn main() -> Result<()> {
 Open-Meteo returned nothing"
                 )
             })?;
-            let view = NowcastView::new(&location, &nowcast, Utc::now());
+            let view = NowcastView::new(&location, &nowcast, Utc::now(), imperial);
 
             if args.json {
                 println!("{}", serde_json::to_string_pretty(&view)?);
@@ -259,7 +357,7 @@ Open-Meteo returned nothing"
 
             match service.nowcast(&location, cli.refresh).await {
                 Some(nowcast) => {
-                    let view = NowcastView::new(&location, &nowcast, Utc::now());
+                    let view = NowcastView::new(&location, &nowcast, Utc::now(), imperial);
                     if args.json {
                         println!("{}", serde_json::to_string(&view)?);
                     } else if args.text {
@@ -300,7 +398,7 @@ Open-Meteo returned nothing"
 
             if args.json && !args.raw {
                 // The labelled view, which is what the front-ends render.
-                let view = ForecastView::new(&forecast, Utc::now(), hours, imperial, clock24);
+                let view = ForecastView::new(&forecast, &location, Utc::now(), hours, imperial, clock24);
                 println!("{}", serde_json::to_string_pretty(&view)?);
             } else if args.json {
                 println!("{}", serde_json::to_string_pretty(&forecast)?);
@@ -441,6 +539,103 @@ Open-Meteo returned nothing"
             }
         }
 
+        Command::Day(args) => {
+            let location = resolve_location(args.lat, args.lon, args.name, &config)?;
+            let clock24 = args.clock.as_deref().map_or(config.clock_is_24h(), |clock| {
+                !clock.eq_ignore_ascii_case("12h")
+            });
+            let date = match args.date.as_deref() {
+                Some(value) => NaiveDate::parse_from_str(value, "%Y-%m-%d")
+                    .with_context(|| format!("--date wants YYYY-MM-DD, not {value:?}"))?,
+                None => Utc::now().date_naive(),
+            };
+
+            let service = service(cli.knmi_key, cli.offline)?;
+            let timezone = location.timezone.clone().unwrap_or_else(|| "auto".to_string());
+            let (forecast, provider) = service.forecast_on(&location, &timezone, date).await?;
+            let view = DayView::build(&location, &forecast, date, provider, imperial, clock24);
+
+            if args.text {
+                print_day(&view);
+            } else {
+                println!("{}", serde_json::to_string(&view)?);
+            }
+        }
+
+        Command::Radar(args) => {
+            let location = resolve_location(args.lat, args.lon, args.name, &config)?;
+            let service = service(cli.knmi_key, cli.offline)?;
+            let bbox = match args.bbox.as_deref() {
+                Some(value) => parse_bbox(value)?,
+                // About 400 km each way around the place, which is a few hours of rain in any
+                // direction — enough to pan around inside without asking again.
+                None => [
+                    location.longitude - 3.5,
+                    location.latitude - 2.2,
+                    location.longitude + 3.5,
+                    location.latitude + 2.2,
+                ],
+            };
+
+            // The frame list rides along with the image: one process spawn feeds a whole map.
+            // A failure here is not fatal — the newest frame is still an image — but it is
+            // said out loud rather than swallowed.
+            let frames = match service.radar_frames().await {
+                Ok(frames) => frames,
+                Err(error) => {
+                    eprintln!("radar: no frame list: {error}");
+                    Vec::new()
+                }
+            };
+            let frames_ms: Vec<i64> = frames.iter().map(|frame| frame.timestamp_millis()).collect();
+
+            if args.frames {
+                if args.json {
+                    let view = serde_json::json!({
+                        "framesMs": frames_ms,
+                        "attribution": rustybui_core::RADAR_ATTRIBUTION,
+                    });
+                    println!("{}", serde_json::to_string(&view)?);
+                } else if frames.is_empty() {
+                    println!("Radar · no frames listed by the service");
+                } else {
+                    for frame in &frames {
+                        println!("{}", frame.format("%Y-%m-%dT%H:%MZ"));
+                    }
+                }
+                return Ok(());
+            }
+
+            let time = parse_instant(args.time.as_deref())?;
+            let image = service.radar_image(bbox, args.width, args.height, time).await?;
+
+            if args.json {
+                let view = serde_json::json!({
+                    "image": image,
+                    "framesMs": frames_ms,
+                    "attribution": rustybui_core::RADAR_ATTRIBUTION,
+                });
+                println!("{}", serde_json::to_string(&view)?);
+            } else {
+                let frame = DateTime::from_timestamp_millis(image.time_ms)
+                    .map(|frame| frame.format("%Y-%m-%d %H:%M").to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                println!(
+                    "Radar · {}×{} · frame {frame} UTC{}",
+                    image.width,
+                    image.height,
+                    if image.cached { " (cached)" } else { "" }
+                );
+                println!(
+                    "  covers  lon {:.3}..{:.3}, lat {:.3}..{:.3}",
+                    image.bbox[0], image.bbox[2], image.bbox[1], image.bbox[3]
+                );
+                println!("  file    {}", image.path.display());
+                println!("  frames  {}", frames.len());
+                println!("  {}", image.attribution);
+            }
+        }
+
         Command::Search(args) => {
             let client = OpenMeteoClient::new(ResponseCache::new())?;
             let places = client.search_places(&args.query, args.count).await?;
@@ -509,7 +704,97 @@ Open-Meteo returned nothing"
                     Some(location) => println!("location: {location}"),
                     None => println!("location: none stored (see `rustybui set-location`)"),
                 }
+                if config.places.is_empty() {
+                    println!("places  : none saved (see `rustybui places --add`)");
+                } else {
+                    let mut names: Vec<&str> =
+                        config.places.iter().map(|place| place.name.as_str()).collect();
+                    names.sort_unstable_by_key(|name| name.to_lowercase());
+                    println!("places  : {}", names.join(", "));
+                }
             }
+        }
+
+        Command::Places(args) => {
+            let mut config = config;
+
+            if args.add {
+                let place = config
+                    .location
+                    .clone()
+                    .context("no location stored yet — search for one first, then save it")?;
+                let known = config.has_place(&place.name);
+                match config.save_place(place.clone()) {
+                    Ok(()) => {
+                        let path = config.save()?;
+                        println!(
+                            "{} {} ({} in all) · config: {}",
+                            if known { "updated:" } else { "saved:" },
+                            place,
+                            config.places.len(),
+                            path.display()
+                        );
+                    }
+                    Err(reason) => bail!("{reason}"),
+                }
+                return Ok(());
+            }
+
+            if let Some(name) = args.remove.as_deref() {
+                match config.forget_place(name) {
+                    Some(gone) => {
+                        let path = config.save()?;
+                        println!("forgot: {} · config: {}", gone, path.display());
+                    }
+                    None => bail!("{} is not a saved place — `rustybui places` lists them", name.trim()),
+                }
+                return Ok(());
+            }
+
+            if let Some(name) = args.use_place.as_deref() {
+                match config.use_place(name) {
+                    Some(place) => {
+                        let path = config.save()?;
+                        println!("now showing: {place} · config: {}", path.display());
+                    }
+                    None => bail!("{} is not a saved place — `rustybui places` lists them", name.trim()),
+                }
+                return Ok(());
+            }
+
+            if args.json {
+                let view = PlacesView {
+                    places: config.places.clone(),
+                    limit: config::MAX_PLACES,
+                    location: config.location.clone(),
+                };
+                println!("{}", serde_json::to_string(&view)?);
+                return Ok(());
+            }
+
+            if config.places.is_empty() {
+                println!("no saved places yet — `rustybui places --add` saves the current one");
+                return Ok(());
+            }
+            let current = config.location.as_ref().map(|location| location.name.to_lowercase());
+            for place in &config.places {
+                let here = current.as_deref() == Some(place.name.to_lowercase().as_str());
+                println!(
+                    "{} {}{}",
+                    if here { "»" } else { " " },
+                    place,
+                    place
+                        .timezone
+                        .as_ref()
+                        .map(|zone| format!(" · {zone}"))
+                        .unwrap_or_default()
+                );
+            }
+            println!(
+                "{} of {} saved · `--use <name>`, `--remove <name>`",
+                config.places.len(),
+                config::MAX_PLACES
+            );
         }
 
         Command::Which => {
@@ -574,6 +859,32 @@ fn print_stats(service: &NowcastService) {
     println!("{}", line("Open-Meteo", open_meteo.snapshot()));
 }
 
+fn parse_bbox(value: &str) -> Result<[f64; 4]> {
+    let numbers: Vec<f64> = value
+        .split(',')
+        .filter_map(|part| part.trim().parse::<f64>().ok())
+        .collect();
+    if numbers.len() != 4 {
+        bail!("--bbox wants four numbers, minLon,minLat,maxLon,maxLat — got {value:?}");
+    }
+    let bbox = [numbers[0], numbers[1], numbers[2], numbers[3]];
+    if bbox[0] >= bbox[2] || bbox[1] >= bbox[3] {
+        bail!("--bbox is inside out: minLon/maxLon or minLat/maxLat are the wrong way round");
+    }
+    Ok(bbox)
+}
+
+fn parse_instant(value: Option<&str>) -> Result<Option<DateTime<Utc>>> {
+    match value {
+        None => Ok(None),
+        Some(value) => Ok(Some(
+            DateTime::parse_from_rfc3339(value)
+                .with_context(|| format!("--time wants an RFC 3339 instant, not {value:?}"))?
+                .with_timezone(&Utc),
+        )),
+    }
+}
+
 fn resolve_location(
     lat: Option<f64>,
     lon: Option<f64>,
@@ -625,7 +936,6 @@ fn resolve_location(
 }
 
 fn print_nowcast(view: &NowcastView, imperial: bool) {
-    let unit = if imperial { "in/h" } else { "mm/h" };
     println!(
         "Rain nowcast · {} · {}",
         view.location.name, view.provider.label
@@ -644,9 +954,9 @@ fn print_nowcast(view: &NowcastView, imperial: bool) {
         println!("  stops in {}", ends);
     }
     println!(
-        "  total {:.2} mm   peak {:.2} mm/h{}",
-        view.summary.total_mm,
-        view.summary.peak_mm_per_hour,
+        "  total {}   peak {}{}",
+        format_millimetres(view.summary.total_mm, imperial),
+        format_rate(view.summary.peak_mm_per_hour, imperial),
         view.summary
             .peak_in_label
             .as_ref()
@@ -661,12 +971,11 @@ fn print_nowcast(view: &NowcastView, imperial: bool) {
         let bar_len = ((point.mm_per_hour / max) * 24.0).round() as usize;
         let marker = if point.is_now { "<" } else { " " };
         println!(
-            "  {} {} {:<24} {:>7} {}",
+            "  {} {} {:<24} {:>9}",
             local.format("%H:%M"),
             marker,
             "█".repeat(bar_len.max((point.mm_per_hour > 0.0) as usize)),
-            format_intensity(point.mm_per_hour),
-            unit
+            format_rate(point.mm_per_hour, imperial),
         );
     }
     println!();
@@ -675,6 +984,58 @@ fn print_nowcast(view: &NowcastView, imperial: bool) {
 
 /// Short human summary of the app payload — the JSON is the real output; this is
 /// for reading in a terminal and for smoke-testing the pipeline by eye.
+fn print_day(view: &DayView) {
+    println!(
+        "{} · {} ({})",
+        view.location.name, view.day_label, view.date
+    );
+
+    if let Some(day) = &view.day {
+        let sun = match (&day.sunrise_label, &day.sunset_label) {
+            (Some(rise), Some(set)) => format!(" · {rise} → {set}"),
+            _ => String::new(),
+        };
+        println!(
+            "  {} / {} · {}{}{}{}",
+            day.high_label.clone().unwrap_or_else(|| "-".into()),
+            day.low_label.clone().unwrap_or_else(|| "-".into()),
+            day.condition_label,
+            day.precipitation_label
+                .as_ref()
+                .map(|label| format!(" · {label}"))
+                .unwrap_or_default(),
+            day.uv_label
+                .as_ref()
+                .map(|label| format!(" · UV {label}"))
+                .unwrap_or_default(),
+            sun
+        );
+    }
+
+    if view.hours.is_empty() {
+        println!("  no hourly rows for this day");
+    }
+    for hour in &view.hours {
+        println!(
+            "  {}  {}  {}  {}",
+            hour.clock_label,
+            hour.temperature_label.clone().unwrap_or_else(|| "-".into()),
+            hour.condition_label,
+            hour.probability_label.clone().unwrap_or_default()
+        );
+    }
+
+    println!(
+        "  {} rows · {}{}",
+        view.hours.len(),
+        view.timezone,
+        view.forecast_attribution
+            .as_ref()
+            .map(|attribution| format!(" · {attribution}"))
+            .unwrap_or_default()
+    );
+}
+
 fn print_app(view: &AppView) {
     println!("{}", view.headline());
 
@@ -736,6 +1097,26 @@ fn print_app(view: &AppView) {
         );
     }
 
+    if let Some(sky) = &view.sky {
+        // The sun's times come from the forecast; the moon is arithmetic over the clock.
+        let sun = match (&sky.sunrise_label, &sky.sunset_label) {
+            (Some(rise), Some(set)) => format!(
+                "{rise} to {set} · {}{}",
+                sky.daylight_label.clone().unwrap_or_else(|| "-".into()),
+                sky.sun_event_label
+                    .as_ref()
+                    .map(|event| format!(" · {event}"))
+                    .unwrap_or_default()
+            ),
+            _ => "no times from the provider".to_string(),
+        };
+        println!(
+            "  sky:     sun {sun}{}",
+            if sky.is_daylight { "" } else { " · night" }
+        );
+        println!("  moon:    {} · {}", sky.moon_phase_label, sky.moon_label);
+    }
+
     for error in &view.errors {
         println!("  ! {error}");
     }
@@ -757,14 +1138,23 @@ fn print_forecast(
 
     if let Some(current) = &forecast.current {
         println!(
-            "  now: {}°C (feels {}°C) · {}% RH · {} km/h · {} hPa{}",
-            current.temperature_c.map_or("-".into(), |v| format!("{v:.1}")),
+            "  now: {}{} · {}% RH · {}{}{}",
+            current
+                .temperature_c
+                .map_or("-".into(), |v| format_temperature(v, imperial)),
             current
                 .apparent_temperature_c
-                .map_or("-".into(), |v| format!("{v:.1}")),
+                .map_or(String::new(), |v| format!(
+                    " (feels {})",
+                    format_temperature(v, imperial)
+                )),
             current.relative_humidity_pct.map_or("-".into(), |v| format!("{v:.0}")),
-            current.wind_speed_kmh.map_or("-".into(), |v| format!("{v:.1}")),
-            current.pressure_msl_hpa.map_or("-".into(), |v| format!("{v:.0}")),
+            current
+                .wind_speed_kmh
+                .map_or("-".into(), |v| format_speed(v, imperial)),
+            current
+                .pressure_msl_hpa
+                .map_or(String::new(), |v| format!(" · {}", format_pressure(v, imperial))),
             if current.is_day == Some(false) { " · night" } else { "" }
         );
     }
@@ -773,40 +1163,39 @@ fn print_forecast(
     for sample in forecast.hourly_from(Utc::now(), hours) {
         let local = sample.time.with_timezone(&offset);
         println!(
-            "    {}  {:>5}°C  {:>3}%  {:>5} {}  {:>4}%  wind {:>5} km/h",
+            "    {}  {:>7}  {:>3}%  {:>9}  {:>4}%  wind {:>9}",
             local.format("%H:%M"),
-            sample.temperature_c.map_or("-".into(), |v| format!("{v:.1}")),
+            sample
+                .temperature_c
+                .map_or("-".into(), |v| format_temperature(v, imperial)),
             sample
                 .relative_humidity_pct
                 .map_or("-".into(), |v| format!("{v:.0}")),
             sample
                 .precipitation_mm
-                .map(|mm| if imperial {
-                    format!("{:.3}", mm / 25.4)
-                } else {
-                    format!("{mm:.2}")
-                })
-                .unwrap_or_else(|| "-".into()),
-            if imperial { "in" } else { "mm" },
+                .map_or("-".into(), |mm| format_millimetres(mm, imperial)),
             sample
                 .precipitation_probability_pct
                 .map_or("-".into(), |v| format!("{v:.0}")),
-            sample.wind_speed_kmh.map_or("-".into(), |v| format!("{v:.1}"))
+            sample
+                .wind_speed_kmh
+                .map_or("-".into(), |v| format_speed(v, imperial))
         );
     }
 
     println!("\n  daily");
     for day in forecast.daily.iter().take(days) {
         println!(
-            "    {}  {:>5}° / {:>5}°C  UV {:<4}  {:>5} mm  sunrise {}  sunset {}",
+            "    {}  {:>7} / {:>7}  UV {:<4}  {:>9}  sunrise {}  sunset {}",
             day.date,
-            day.temperature_max_c.map_or("-".into(), |v| format!("{v:.1}")),
-            day.temperature_min_c.map_or("-".into(), |v| format!("{v:.1}")),
+            day.temperature_max_c
+                .map_or("-".into(), |v| format_temperature(v, imperial)),
+            day.temperature_min_c
+                .map_or("-".into(), |v| format_temperature(v, imperial)),
             day.uv_index_max.map_or("-".into(), |v| format!("{v:.1}")),
             // Through the shared formatter: a raw f64 prints 0.9999999999999999.
             day.precipitation_mm
-                .map(|mm| if imperial { format!("{:.3}", mm / 25.4) } else { format!("{mm:.2}") })
-                .unwrap_or_else(|| "0.00".into()),
+                .map_or(format_millimetres(0.0, imperial), |mm| format_millimetres(mm, imperial)),
             day.sunrise
                 .map(|t| t.with_timezone(&offset).format("%H:%M").to_string())
                 .unwrap_or_else(|| "-".into()),

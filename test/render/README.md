@@ -8,13 +8,19 @@ real payloads the binary produces, and writes PNGs to `test/render/out/`.
 container/render-qml.sh /path/to/omarchy-checkout        # dry: nothing falling in the window
 container/render-qml.sh /path/to/omarchy-checkout wet    # rain in about 20 minutes
 container/render-qml.sh /path/to/omarchy-checkout alerts  # warnings in force
+container/render-qml.sh /path/to/omarchy-checkout daylight # the sun still up, the moon a crescent
+container/render-qml.sh /path/to/omarchy-checkout day    # a day in the list opened up
+container/render-qml.sh /path/to/omarchy-checkout map    # the radar map on its own
 ```
 
 Three drivers run against whichever case is asked for: `App.qml` (the window), `AppSettings.qml`
 (the same window with its settings open, grabbing with a `settings-` prefix so the two images
-stay apart) and `Pill.qml` (the bar pill and the popout it opens). The fixtures come from
-`test/fixtures/`, and the bar and app payloads have synthetic variants for states a quiet day
-cannot show (`make-bar-wet.py`, `make-app-alerts.py`).
+stay apart) and `Pill.qml` (the bar pill and the popout it opens); two cases have drivers of
+their own, because what they show cannot be reached by rendering the window alone — `AppDay.qml`
+clicks a day row to open it, and `Map.qml` renders the map, which is the one card that fetches
+for itself. The fixtures come from `test/fixtures/`, and the payloads have synthetic variants for
+states a quiet day cannot show (`make-bar-wet.py`, `make-app-alerts.py`, `make-app-daylight.py`
+for a sun that is still up and a moon big enough to see).
 
 It needs an Omarchy checkout for two reasons: `shell/Commons/{Color,Style,Border,Util}.qml`
 are copied in as the theme singletons — so the render is themed by the code that themes the
@@ -50,7 +56,7 @@ reference for what a `FloatingWindow` accepts.
 
 ## What it has already caught
 
-Both of these were real, and both were invisible to `qmllint`:
+All of these were real, and all were invisible to `qmllint`:
 
 - `qml/NowcastChart.qml` read `tickRow.height` from an id inside a `Repeater` delegate, which
   is a `ReferenceError` on every evaluation, so the tick row never had a height. It now
@@ -60,7 +66,24 @@ Both of these were real, and both were invisible to `qmllint`:
   staged `qmllint` was happy — but editors, and this harness, saw a directory where `Card`
   was undefined. Hence the symlink, and hence the `is not a type` guard in
   `container/lint-plugins.sh` that would catch a staging script that does drop a file.
+- `qml/RadarMap.qml` coloured its basemap with `Model.withAlpha(map.theme.foreground, 0.5)`,
+  and the map's *default* palette is colour *strings*. `Qt.rgba(undefined, …)` is an invalid
+  colour, the canvas drops it without a word, and the coastlines were drawn in black on a
+  near-black background. The render showed a map with nothing on it but the radar.
+- The same file's basemap was a `Canvas`, which renders into a texture — and this harness's
+  offscreen software renderer does not composite textures at all. A probe that filled a red
+  square proved it: zero red pixels. The basemap is now a `Shape` with `PathSvg`, which is
+  geometry, and it appears in the renders.
+- `qml/MoonDisc.qml` used `Style.space(26)` without importing `qs.Commons`. The moon simply
+  was not there; the text beside it was.
 
 Two more looked like bugs and were not: `implicitHeight` and `minimumSize` on
 `FloatingWindow` are real, Omarchy's own gallery sets both, and it was this harness's stub
 that was missing them.
+
+## The lesson, in one line
+
+Look at the image, and then check the pixels. Three of the five above were found by cropping
+the PNG and reading it, and the two that a look would only have called "a bit odd" — a canvas
+that silently drew nothing, and an accent colour that fell back to grey — were settled by
+counting pixels of a known colour.

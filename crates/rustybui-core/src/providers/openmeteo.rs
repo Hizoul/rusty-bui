@@ -48,6 +48,71 @@ impl OpenMeteoClient {
         self.http.stats()
     }
 
+    /// One day of this location's forecast, from the same request narrowed to a single date.
+    ///
+    /// `fresh_for` is the caller's: a day that has already happened will not change, and
+    /// shouldn't be re-fetched every time a row is reopened, while today's is reissued hourly.
+    pub async fn fetch_day(
+        &self,
+        location: &Location,
+        timezone: &str,
+        date: chrono::NaiveDate,
+        fresh_for: StdDuration,
+    ) -> ProviderResult<Forecast> {
+        let day = date.format("%Y-%m-%d").to_string();
+        let query = self
+            .forecast_query(location, timezone)
+            .into_iter()
+            // `current` is about now, not about a date in the list.
+            .filter(|(key, _)| *key != "current")
+            .chain([
+                ("start_date", day.clone()),
+                ("end_date", day.clone()),
+            ])
+            .collect::<Vec<(&str, String)>>();
+
+        let raw = self.http.get_text(FORECAST_URL, &query, None, fresh_for).await?;
+        Forecast::from_open_meteo(&raw).map_err(|reason| ProviderError::Decode {
+            provider: "Open-Meteo",
+            reason,
+        })
+    }
+
+    /// Full forecast for a location, in the location's own timezone.
+    pub async fn fetch_forecast(
+        &self,
+        location: &Location,
+        timezone: &str,
+    ) -> ProviderResult<Forecast> {
+        let query = self.forecast_query(location, timezone);
+
+        // Model forecasts are reissued hourly; 15 minutes of freshness costs
+        // nothing and keeps repeated app launches off the network.
+        let raw = self
+            .http
+            .get_text(FORECAST_URL, &query, None, StdDuration::from_secs(900))
+            .await?;
+
+        Forecast::from_open_meteo(&raw).map_err(|reason| ProviderError::Decode {
+            provider: "Open-Meteo",
+            reason,
+        })
+    }
+
+    /// The forecast request, without the parts that make one call differ from another.
+    fn forecast_query(&self, location: &Location, timezone: &str) -> Vec<(&'static str, String)> {
+        vec![
+            ("latitude", location.latitude.to_string()),
+            ("longitude", location.longitude.to_string()),
+            ("timezone", timezone.to_string()),
+            ("current", CURRENT_FIELDS.to_string()),
+            ("hourly", HOURLY_FIELDS.to_string()),
+            ("daily", DAILY_FIELDS.to_string()),
+            ("timeformat", "unixtime".to_string()),
+            ("models", MODELS.to_string()),
+        ]
+    }
+
     /// Keyless 15-minute model precipitation, aligned to the same ±window as the
     /// radar sources. Lower fidelity than radar, so the UI draws 15-minute bars.
     pub async fn fetch_minutely15(
@@ -120,36 +185,6 @@ impl OpenMeteoClient {
         }
 
         Ok(RainNowcast::new(points, NowcastProvider::OpenMeteo, false))
-    }
-
-    /// Full forecast for a location, in the location's own timezone.
-    pub async fn fetch_forecast(
-        &self,
-        location: &Location,
-        timezone: &str,
-    ) -> ProviderResult<Forecast> {
-        let query = vec![
-            ("latitude", location.latitude.to_string()),
-            ("longitude", location.longitude.to_string()),
-            ("timezone", timezone.to_string()),
-            ("current", CURRENT_FIELDS.to_string()),
-            ("hourly", HOURLY_FIELDS.to_string()),
-            ("daily", DAILY_FIELDS.to_string()),
-            ("timeformat", "unixtime".to_string()),
-            ("models", MODELS.to_string()),
-        ];
-
-        // Model forecasts are reissued hourly; 15 minutes of freshness costs
-        // nothing and keeps repeated app launches off the network.
-        let raw = self
-            .http
-            .get_text(FORECAST_URL, &query, None, StdDuration::from_secs(900))
-            .await?;
-
-        Forecast::from_open_meteo(&raw).map_err(|reason| ProviderError::Decode {
-            provider: "Open-Meteo",
-            reason,
-        })
     }
 
     /// Air quality (European AQI + PM values) for the air-quality block.

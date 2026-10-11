@@ -5,15 +5,19 @@ pub mod alerts;
 pub mod cache;
 pub mod forecast;
 pub mod location;
+pub mod moon;
 pub mod nowcast;
 pub mod providers;
+pub mod radar;
+pub mod solar;
+pub mod units;
 pub mod view;
 
 pub mod appview;
 
 pub use appview::{
-    condition_label, wind_compass, AirQualityView, AppParts, AppView, CurrentView, DailyView,
-    ForecastView, HourlyView,
+    condition_label, wind_compass, AirQualityView, AlertView, AppParts, AppView, CurrentView,
+    DailyView, DayView, ForecastView, HourlyView,
 };
 
 pub use alerts::{Alert, AlertSeverity};
@@ -27,6 +31,10 @@ pub use location::Location;
 pub use nowcast::{
     format_intensity, format_millimeters, format_minutes, intensity_class, IntensityClass,
     NowcastPoint, NowcastProvider, NowcastSummary, RainNowcast, RAIN_THRESHOLD_MM_H,
+};
+pub use radar::{RadarImage, RadarMapClient, RADAR_ATTRIBUTION};
+pub use units::{
+    format_millimetres, format_pressure, format_rate, format_speed, format_temperature,
 };
 pub use providers::{
     BrightSkyClient, DwdRadarClient, FetchStats, ForecastProvider, HttpClient, KnmiNowcastClient,

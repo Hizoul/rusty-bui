@@ -50,6 +50,53 @@ impl BrightSkyClient {
         self.http.stats()
     }
 
+    /// One day of hourly records: the same request, narrowed to a single date.
+    ///
+    /// The `/current_weather` call is skipped — it describes now, not the day being opened —
+    /// and a date the service will not serve comes back with no records at all, which the
+    /// caller reads as "ask the other provider".
+    pub async fn fetch_day(
+        &self,
+        location: &Location,
+        timezone: &str,
+        date: chrono::NaiveDate,
+        fresh_for: Duration,
+    ) -> ProviderResult<Forecast> {
+        let timezone = if timezone.is_empty() || timezone == "auto" { "UTC" } else { timezone };
+        let day = date.format("%Y-%m-%d").to_string();
+        // `last_date` is exclusive: asking for `date=D&last_date=D` answers with the boundary
+        // hour alone. Ask through the following midnight, and let the caller's own date filter
+        // drop the extra row.
+        let range = vec![
+            ("lat", format!("{:.4}", location.latitude)),
+            ("lon", format!("{:.4}", location.longitude)),
+            ("date", day.clone()),
+            (
+                "last_date",
+                (date + ChronoDuration::days(1)).format("%Y-%m-%d").to_string(),
+            ),
+            ("tz", timezone.to_string()),
+        ];
+
+        let weather = self.http.get_text(WEATHER_URL, &range, None, fresh_for).await?;
+        let forecast = Forecast::from_bright_sky(
+            "{}",
+            &weather,
+            location.latitude,
+            location.longitude,
+            timezone,
+        )
+        .map_err(|reason| ProviderError::Decode { provider: "DWD", reason })?;
+
+        if forecast.hourly.is_empty() {
+            return Err(ProviderError::Unavailable {
+                provider: "DWD",
+                reason: format!("no hourly records for {day}"),
+            });
+        }
+        Ok(forecast)
+    }
+
     /// Current conditions plus an hourly range for `location`.
     ///
     /// `timezone` must be an IANA zone or `UTC`: Bright Sky stamps its records in the

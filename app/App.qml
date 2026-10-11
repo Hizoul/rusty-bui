@@ -61,7 +61,11 @@ Item {
   // actually chosen one; until then the plugin's setting stands.
   property int hours: Number(pref("hours", "hours", setting("hours", 24)))
   property bool clock24: pref("clock24", "clock", setting("clock24", true) !== false) === true
-  property bool offline: pref("offline", "offline", setting("offline", false) === true) === true
+  readonly property bool offline: pref("offline", "offline", setting("offline", false) === true) === true
+  // Units are the stored preference rather than a plugin default: the payload's labels are
+  // already in them, so this only decides what the toggle says.
+  readonly property bool imperial: root.prefs !== null && String(root.prefs.units) === "imperial"
+  readonly property string unitsLabel: root.imperial ? "Imperial" : "Metric"
 
   // ---- the window's own settings, which the binary stores -------------------
   property var prefs: null
@@ -87,6 +91,7 @@ Item {
   readonly property var forecast: view ? view.forecast : null
   readonly property var current: (view && view.forecast) ? view.forecast.current : null
   readonly property var air: view ? view.air : null
+  readonly property var sky: view ? view.sky : null
 
   readonly property color background: Commons.Color.background
   readonly property color foreground: Commons.Color.foreground
@@ -119,6 +124,67 @@ Item {
       if (exitCode === 0) return
       root.hintText = root.binaryPath + " exited " + exitCode
     }
+  }
+
+  // ---- the radar map's image -----------------------------------------------
+  // The map says which box, size and frame it wants; this asks the binary for it, the way
+  // every other number on screen arrives. The image itself lives on disk — a few hundred
+  // kilobytes of PNG — and QML loads it from the path in the payload.
+  property var radar: null
+  property var radarRequest: null
+  property string radarNotice: ""
+
+  readonly property var radarCommandLine: {
+    if (!root.radarRequest) return []
+    var command = [root.binaryPath]
+    if (root.offline) command.push("--offline")
+    command.push(
+      "radar", "--json",
+      "--bbox", root.radarRequest.bbox.join(","),
+      "--width", String(root.radarRequest.width),
+      "--height", String(root.radarRequest.height)
+    )
+    if (root.radarRequest.timeMs) command.push("--time", new Date(Number(root.radarRequest.timeMs)).toISOString())
+    return command
+  }
+
+  Process {
+    id: radarProc
+    command: root.radarCommandLine
+
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.applyRadar(text)
+    }
+
+    onExited: function(exitCode) {
+      if (exitCode === 0) return
+      root.radarNotice = "no radar image for this view"
+    }
+  }
+
+  function requestRadar(bbox, width, height, timeMs) {
+    root.radarNotice = ""
+    root.radarRequest = { bbox: bbox, width: width, height: height, timeMs: timeMs }
+    // Changing the command while the process runs restarts it with the new arguments, which
+    // is what a second request during a drag wants anyway.
+    radarProc.running = true
+  }
+
+  function applyRadar(text) {
+    var payload = null
+    try {
+      payload = JSON.parse(text)
+    } catch (error) {
+      root.radarNotice = "unreadable radar payload"
+      return
+    }
+    if (!payload || !payload.image || !payload.image.path) {
+      root.radarNotice = "no radar image for this view"
+      return
+    }
+    root.radar = payload
+    root.radarNotice = ""
   }
 
   // ---- the settings the window can change, all through the binary ----------
@@ -250,7 +316,14 @@ Item {
 
     onExited: function(exitCode) {
       root.pendingPrefs = null
-      if (exitCode !== 0) root.searchHint = "could not store that preference"
+      if (exitCode !== 0) {
+        root.searchHint = "could not store that preference"
+        return
+      }
+      // Clock, hours and units all change the labels the payload carries, so a preference is
+      // only really applied once the window has asked for a new payload.
+      root.loadPrefs()
+      root.refresh()
     }
   }
 
@@ -259,6 +332,189 @@ Item {
     Qt.callLater(function() {
       if (!savePrefsProc.running) savePrefsProc.running = true
     })
+  }
+
+  // ---- saved places --------------------------------------------------------
+  // The stored location is what the window shows; the places are the ones worth coming back to.
+  // Switching is a `places --use`, saving is a `places --add`, and forgetting a place takes a
+  // deliberate click on its × — there is no undo, but there is the search box.
+  property var placeAction: null
+  property string placesHint: ""
+
+  readonly property var savedPlaces: (root.prefs && root.prefs.places) ? root.prefs.places : []
+  readonly property var storedPlace: root.prefs ? root.prefs.location : null
+  readonly property int placeLimit: (root.prefs && root.prefs.placeLimit) ? Number(root.prefs.placeLimit) : 12
+
+  function hasSaved(name) {
+    if (!name) return false
+    for (var index = 0; index < root.savedPlaces.length; index++)
+      if (String(root.savedPlaces[index].name).toLowerCase() === String(name).toLowerCase()) return true
+    return false
+  }
+
+  /// Whether the place on screen could be saved — it exists, it is not saved, and there is room.
+  readonly property bool canSavePlace: root.storedPlace !== null
+    && !root.hasSaved(root.storedPlace.name)
+    && root.savedPlaces.length < root.placeLimit
+
+  readonly property var placesCommandLine: {
+    var action = root.placeAction
+    if (!action) return []
+    if (action.kind === "add") return [root.binaryPath, "places", "--add"]
+    return [root.binaryPath, "places", "--" + action.kind, String(action.name)]
+  }
+
+  Process {
+    id: placesProc
+    command: root.placesCommandLine
+
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var said = String(text).replace(/^\s+|\s+$/g, "")
+        if (said !== "") root.placesHint = said
+      }
+    }
+
+    // A refusal ("12 saved places is the limit") arrives on stderr, and is worth showing.
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var said = String(text).replace(/^\s+|\s+$/g, "")
+        if (said !== "") root.placesHint = said.split("\n")[0].replace(/^Error: /, "")
+      }
+    }
+
+    onExited: function(exitCode) {
+      root.placeAction = null
+      if (exitCode !== 0) {
+        if (root.placesHint === "") root.placesHint = "that did not work (exit " + exitCode + ")"
+        return
+      }
+      root.loadPrefs()
+      root.refresh()
+    }
+  }
+
+  function placeStep(kind, name) {
+    root.placesHint = ""
+    root.placeAction = { kind: kind, name: name }
+    Qt.callLater(function() {
+      if (!placesProc.running && root.placesCommandLine.length > 0) placesProc.running = true
+    })
+  }
+
+  // ---- one day, opened up --------------------------------------------------
+  // A row in the day list expands into the hours behind it: the same payload shape the CLI's
+  // `day` command prints, fetched for that one date and rendered by the same hour strip.
+  property var dayDetail: null
+  property string dayHint: ""
+  property var dayRequest: null
+
+  readonly property var dayCommandLine: {
+    var request = root.dayRequest
+    if (!request) return []
+    var command = [root.binaryPath]
+    if (root.offline) command.push("--offline")
+    command.push("day", "--date", String(request.date))
+    if (root.view && root.view.location) {
+      command.push(
+        "--lat", String(root.view.location.latitude),
+        "--lon", String(root.view.location.longitude),
+        "--name", String(root.view.location.name)
+      )
+    }
+    if (!root.clock24) command.push("--clock", "12h")
+    return command
+  }
+
+  Process {
+    id: dayProc
+    command: root.dayCommandLine
+
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.applyDay(text)
+    }
+
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var said = String(text).replace(/^\s+|\s+$/g, "")
+        if (said !== "") root.dayHint = said.split("\n")[0].replace(/^Error: /, "")
+      }
+    }
+
+    onExited: function(exitCode) {
+      root.dayRequest = null
+      if (exitCode === 0) return
+      if (root.dayHint === "") root.dayHint = "no forecast for that day (exit " + exitCode + ")"
+    }
+  }
+
+  /// Brings the day card into view. A row near the end of the list opens a card that starts
+  /// below the window, and a detail nobody can see is a detail nobody asked for.
+  function revealDay() {
+    if (!scroller || !dayCard) return
+    var wanted = dayCard.y - Style.space(8)
+    scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, wanted))
+  }
+
+  /// Opens a day, or closes it when it is the one already open.
+  function openDay(day) {
+    if (!day) return
+    if (root.dayDetail !== null && String(root.dayDetail.date) === String(day.date)) {
+      root.closeDay()
+      return
+    }
+    root.dayHint = "loading…"
+    root.dayDetail = null
+    root.dayRequest = { date: String(day.date) }
+    Qt.callLater(root.revealDay)
+    Qt.callLater(function() {
+      if (!dayProc.running && root.dayCommandLine.length > 0) dayProc.running = true
+    })
+  }
+
+  function closeDay() {
+    root.dayDetail = null
+    root.dayRequest = null
+    root.dayHint = ""
+  }
+
+  function applyDay(raw) {
+    var text = String(raw === undefined || raw === null ? "" : raw).replace(/^\s+|\s+$/g, "")
+    if (text === "") {
+      root.dayHint = "nothing came back for that day"
+      return
+    }
+    var parsed = null
+    try {
+      parsed = JSON.parse(text)
+    } catch (error) {
+      root.dayHint = "unreadable day payload"
+      return
+    }
+    if (!parsed || !parsed.date) {
+      root.dayHint = "unreadable day payload"
+      return
+    }
+    root.dayDetail = parsed
+    root.dayHint = parsed.hours && parsed.hours.length > 0 ? "" : "no hourly detail for that day"
+    // The card has just grown by the height of a day's hours; keep it in view.
+    Qt.callLater(root.revealDay)
+  }
+
+  /// `15.3° / 3.0° · Overcast · 0.40 mm · 07:27 → 18:17`, or as much of it as the day has.
+  readonly property string daySummary: {
+    if (!root.dayDetail || !root.dayDetail.day) return ""
+    var day = root.dayDetail.day
+    var parts = []
+    if (day.highLabel || day.lowLabel) parts.push((day.highLabel || "—") + " / " + (day.lowLabel || "—"))
+    if (day.conditionLabel) parts.push(String(day.conditionLabel))
+    if (day.precipitationLabel) parts.push(String(day.precipitationLabel))
+    if (day.sunriseLabel && day.sunsetLabel) parts.push(day.sunriseLabel + " → " + day.sunsetLabel)
+    return parts.join(" · ")
   }
 
   // A good payload always replaces the last one; a failure keeps the last good
@@ -559,6 +815,124 @@ Item {
               }
 
               Text {
+                text: "Places"
+                color: root.foreground
+                font.family: Style.font.family
+                font.pixelSize: Style.font.subtitle
+              }
+
+              // One chip per saved place, wrapping rather than scrolling: the whole point is to
+              // see them all at once and click one. The current place is outlined; each chip's ×
+              // forgets it, which is the only way to prune from here.
+              Flow {
+                width: parent.width
+                spacing: Style.space(6)
+
+                Repeater {
+                  model: root.savedPlaces
+
+                  delegate: Rectangle {
+                    id: placeChip
+                    required property var modelData
+
+                    readonly property bool isCurrent: root.storedPlace !== null
+                      && String(root.storedPlace.name).toLowerCase() === String(modelData.name).toLowerCase()
+
+                    width: placeName.implicitWidth + forgetLabel.implicitWidth + Style.space(14)
+                    height: Style.space(28)
+                    radius: Style.cornerRadius
+                    color: Model.withAlpha(root.foreground, placeChip.isCurrent ? 0.14 : (placeRow.containsMouse ? 0.1 : 0.06))
+                    border.width: placeChip.isCurrent ? 1 : 0
+                    border.color: Model.withAlpha(root.accent, 0.7)
+
+                    MouseArea {
+                      id: placeRow
+                      anchors.fill: parent
+                      anchors.rightMargin: forgetLabel.width + Style.space(4)
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: root.placeStep("use", placeChip.modelData.name)
+                    }
+
+                    Text {
+                      id: placeName
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.space(8)
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: placeChip.modelData.name
+                      color: root.foreground
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    Text {
+                      id: forgetLabel
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.space(6)
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "×"
+                      color: forgetRow.containsMouse ? root.urgent : root.muted(0.5)
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.body
+
+                      MouseArea {
+                        id: forgetRow
+                        anchors.fill: parent
+                        anchors.margins: -Style.space(4)
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.placeStep("remove", placeChip.modelData.name)
+                      }
+                    }
+                  }
+                }
+
+                // The place on screen, when it is not saved yet — so switching to somewhere new
+                // and keeping it is one click, not a trip to the command line.
+                Rectangle {
+                  visible: root.canSavePlace
+                  width: savePlaceLabel.implicitWidth + Style.space(16)
+                  height: Style.space(28)
+                  radius: Style.cornerRadius
+                  color: Model.withAlpha(root.accent, savePlaceRow.containsMouse ? 0.26 : 0.16)
+
+                  Text {
+                    id: savePlaceLabel
+                    anchors.centerIn: parent
+                    text: "+ Save " + (root.storedPlace ? root.storedPlace.name : "")
+                    color: root.foreground
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+
+                  MouseArea {
+                    id: savePlaceRow
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.placeStep("add", "")
+                  }
+                }
+
+                Text {
+                  visible: root.savedPlaces.length === 0 && !root.canSavePlace
+                  text: "None saved yet."
+                  color: root.muted(0.5)
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                }
+              }
+
+              Text {
+                width: parent.width
+                visible: text !== ""
+                text: root.placesHint
+                color: root.muted(0.7)
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+              }
+
+              Text {
                 text: "Display"
                 color: root.foreground
                 font.family: Style.font.family
@@ -585,11 +959,16 @@ Item {
                       label: root.offline ? "Offline" : "Online",
                       name: "offline",
                       value: root.offline ? "false" : "true"
+                    },
+                    {
+                      label: root.unitsLabel,
+                      name: "units",
+                      value: root.imperial ? "metric" : "imperial"
                     }
                   ]
 
                   delegate: Rectangle {
-                    width: (parent.width - Style.space(12)) / 3
+                    width: (parent.width - Style.space(18)) / 4
                     height: Style.space(30)
                     radius: Style.cornerRadius
                     color: Model.withAlpha(root.foreground, preferenceRow.containsMouse ? 0.12 : 0.06)
@@ -814,6 +1193,102 @@ Item {
             }
           }
 
+          // ---- sun and moon ---------------------------------------------------
+          // The sun's times come from the provider when it has them and from the arithmetic when
+          // it does not — which is every DWD day. The moon is arithmetic either way.
+          Card {
+            width: parent.width
+            visible: root.sky !== null
+
+            Column {
+              width: parent.width
+              spacing: Style.space(10)
+
+              Row {
+                width: parent.width
+                spacing: Style.space(12)
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: Model.conditionGlyph(0, true)
+                  color: root.accent
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.title
+                }
+
+                Column {
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.space(1)
+
+                  Text {
+                    text: root.sky
+                      ? [root.sky.sunriseLabel, root.sky.sunsetLabel].filter(function(part) { return !!part }).join(" → ")
+                      : ""
+                    color: root.foreground
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.body
+                  }
+
+                  Text {
+                    text: root.sky
+                      ? [root.sky.daylightLabel, root.sky.sunEventLabel].filter(function(part) { return !!part }).join(" · ")
+                      : ""
+                    color: root.muted(0.55)
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+                }
+              }
+
+              // How far through the daylight it is, and nothing at all once the sun is down.
+              Rectangle {
+                width: parent.width
+                height: 2
+                radius: 1
+                visible: root.sky !== null && root.sky.daylightProgress !== null && root.sky.daylightProgress !== undefined
+                color: Model.withAlpha(root.foreground, 0.14)
+
+                Rectangle {
+                  width: parent.width * (root.sky && root.sky.daylightProgress ? root.sky.daylightProgress : 0)
+                  height: parent.height
+                  radius: parent.radius
+                  color: root.accent
+                }
+              }
+
+              Row {
+                width: parent.width
+                spacing: Style.space(12)
+
+                MoonDisc {
+                  anchors.verticalCenter: parent.verticalCenter
+                  illumination: root.sky ? Number(root.sky.moonIllumination) : 0
+                  waxing: root.sky ? root.sky.moonWaxing === true : true
+                  color: root.foreground
+                }
+
+                Column {
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.space(1)
+
+                  Text {
+                    text: root.sky ? root.sky.moonPhaseLabel : ""
+                    color: root.foreground
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.body
+                  }
+
+                  Text {
+                    text: root.sky ? root.sky.moonLabel : ""
+                    color: root.muted(0.55)
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+                }
+              }
+            }
+          }
+
           // ---- rain nowcast --------------------------------------------------
           Card {
             width: parent.width
@@ -874,6 +1349,55 @@ Item {
             }
           }
 
+          // ---- the radar map --------------------------------------------------
+          // DWD's composite, which answers in the projection it is asked for, over coastlines
+          // vendored from Natural Earth. Drag it, wheel to zoom, step through the frames.
+          Card {
+            width: parent.width
+            visible: root.view !== null
+
+            Column {
+              width: parent.width
+              spacing: Style.space(8)
+
+              Item {
+                width: parent.width
+                height: Math.max(mapTitle.implicitHeight, mapHint.implicitHeight)
+
+                Text {
+                  id: mapTitle
+                  anchors.left: parent.left
+                  text: "Rain map"
+                  color: root.foreground
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.subtitle
+                }
+
+                Text {
+                  id: mapHint
+                  anchors.right: parent.right
+                  text: "drag to move · wheel to zoom"
+                  color: root.muted(0.5)
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                }
+              }
+
+              RadarMap {
+                width: parent.width
+                location: root.view ? root.view.location : null
+                radar: root.radar
+                theme: root.theme
+                clock24: root.clock24
+                notice: root.radarNotice
+
+                onImageNeeded: function(bbox, width, height, timeMs) {
+                  root.requestRadar(bbox, width, height, timeMs)
+                }
+              }
+            }
+          }
+
           // ---- next hours ----------------------------------------------------
           Card {
             width: parent.width
@@ -890,59 +1414,11 @@ Item {
                 font.pixelSize: Style.font.subtitle
               }
 
-              Flickable {
+              HourStrip {
                 width: parent.width
-                height: Style.space(96)
-                contentWidth: hourRow.implicitWidth
-                contentHeight: height
-                clip: true
-                flickableDirection: Flickable.HorizontalFlick
-
-                Row {
-                  id: hourRow
-                  spacing: Style.space(10)
-
-                  Repeater {
-                    model: root.hourlyRows
-
-                    delegate: Column {
-                      width: Style.space(46)
-                      spacing: Style.space(3)
-
-                      Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: modelData.clockLabel
-                        color: root.muted(0.6)
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
-                      }
-
-                      Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: Model.conditionGlyph(modelData.weatherCode, modelData.isDaylight)
-                        color: root.accent
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.title
-                      }
-
-                      Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: modelData.temperatureLabel || "—"
-                        color: root.foreground
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.body
-                      }
-
-                      Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: modelData.probabilityLabel || ""
-                        color: root.muted(0.5)
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
-                      }
-                    }
-                  }
-                }
+                hours: root.hourlyRows
+                foreground: root.foreground
+                accent: root.accent
               }
             }
           }
@@ -972,13 +1448,33 @@ Item {
                   width: parent.width
                   height: Math.max(dayGlyph.implicitHeight, dayHigh.implicitHeight) + Style.space(6)
 
+                  // The whole row opens that day's hours; the open one is the one that closes.
+                  readonly property bool opened: root.dayDetail !== null
+                    && String(root.dayDetail.date) === String(modelData.date)
+
+                  Rectangle {
+                    anchors.fill: parent
+                    anchors.leftMargin: -Style.space(6)
+                    anchors.rightMargin: -Style.space(6)
+                    radius: Style.cornerRadius
+                    color: Model.withAlpha(root.foreground, opened ? 0.1 : (dayRow.containsMouse ? 0.06 : 0))
+                  }
+
+                  MouseArea {
+                    id: dayRow
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.openDay(modelData)
+                  }
+
                   Text {
                     id: dayName
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     width: Style.space(84)
                     text: modelData.dayLabel
-                    color: index === 0 ? root.foreground : root.muted(0.8)
+                    color: index === 0 || parent.opened ? root.foreground : root.muted(0.8)
                     font.family: Style.font.family
                     font.pixelSize: Style.font.body
                     elide: Text.ElideRight
@@ -1048,6 +1544,87 @@ Item {
                   return parts.join(" · ")
                 }
                 color: root.muted(0.45)
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+              }
+            }
+          }
+
+          // ---- one day, opened up ----------------------------------------------
+          // What an opened row in the list above turns into: that day's own figures, then its
+          // hours. Fetched for one date only, so reading a day costs one request.
+          Card {
+            id: dayCard
+            width: parent.width
+            visible: root.dayDetail !== null || root.dayHint !== ""
+
+            Column {
+              width: parent.width
+              spacing: Style.space(8)
+
+              Item {
+                width: parent.width
+                height: Math.max(dayTitle.implicitHeight, dayClose.implicitHeight)
+
+                Text {
+                  id: dayTitle
+                  anchors.left: parent.left
+                  text: root.dayDetail ? root.dayDetail.dayLabel : "Day"
+                  color: root.foreground
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.subtitle
+                }
+
+                Text {
+                  id: dayClose
+                  anchors.right: parent.right
+                  text: "Close"
+                  color: root.muted(0.7)
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+
+                  MouseArea {
+                    anchors.fill: parent
+                    anchors.margins: -Style.space(4)
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.closeDay()
+                  }
+                }
+              }
+
+              Text {
+                width: parent.width
+                visible: text !== ""
+                text: root.daySummary
+                color: root.muted(0.85)
+                font.family: Style.font.family
+                font.pixelSize: Style.font.body
+              }
+
+              HourStrip {
+                width: parent.width
+                visible: root.dayDetail !== null
+                hours: root.dayDetail ? root.dayDetail.hours : []
+                foreground: root.foreground
+                accent: root.accent
+              }
+
+              Text {
+                width: parent.width
+                visible: text !== ""
+                text: root.dayHint
+                color: root.muted(0.6)
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+              }
+
+              Text {
+                width: parent.width
+                visible: root.dayDetail !== null && root.dayDetail.forecastAttribution !== undefined
+                text: root.dayDetail
+                  ? [root.dayDetail.timezone, root.dayDetail.forecastAttribution].filter(function(part) { return !!part }).join(" · ")
+                  : ""
+                color: root.muted(0.4)
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption
               }

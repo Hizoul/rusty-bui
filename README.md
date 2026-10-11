@@ -91,13 +91,16 @@ rustybui set-location "Leiden" --lat 52.16 --lon 4.49 --country NL --timezone Eu
 rustybui nowcast                 # human-readable table (+ where each answer came from)
 rustybui nowcast --json          # the camelCase view contract the QML consumes
 rustybui bar                     # Waybar-style JSON for the Omarchy bar: text/class/tooltip
-rustybui app                     # one payload for a whole screen: warnings + nowcast + forecast + air
+rustybui app                     # one payload for a whole screen: warnings + nowcast + forecast + air + sky
 rustybui app --text              # …or a short human summary of the same payload
 rustybui forecast --hours 12 --days 3
+rustybui day --date 2026-10-12   # one day, opened up: the rows behind a day in the list
 rustybui alerts                  # warnings in force, worst first
+rustybui radar --json            # DWD's radar composite as a georeferenced PNG, for the map
 rustybui air
 rustybui search Amersfoort
-rustybui prefs                   # read or change what the window shows: clock, hours, offline
+rustybui prefs                   # read or change what the window shows: clock, hours, offline, units
+rustybui places [--add] [--use <name>] [--remove <name>]   # the places you switch between
 rustybui cache [--clear]         # report or clear the caches
 ```
 

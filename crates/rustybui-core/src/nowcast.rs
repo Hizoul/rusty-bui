@@ -237,10 +237,11 @@ pub struct NowcastSummary {
 }
 
 impl NowcastSummary {
-    /// Short pill text, e.g. `0.4 mm/h`, `in 25 min`, `dry`.
-    pub fn pill_text(&self) -> String {
+    /// Short pill text, e.g. `0.40 mm/h`, `in 25 min`, `dry`. The rate carries its unit and its
+    /// conversion together, so an imperial reader is not shown millimetres in a hat.
+    pub fn pill_text(&self, imperial: bool) -> String {
         if self.is_raining_now {
-            format!("{} mm/h", format_intensity(self.current_mm_per_hour))
+            crate::units::format_rate(self.current_mm_per_hour, imperial)
         } else if let Some(minutes) = self.starts_in_minutes {
             format!("in {}", format_minutes(minutes))
         } else {
@@ -269,12 +270,10 @@ pub fn format_minutes(minutes: i64) -> String {
 }
 
 /// Total accumulation in mm rendered in the user's precipitation unit.
+///
+/// Kept as a name because it is what the front-ends already call; the work is in `units`.
 pub fn format_millimeters(mm: f64, imperial: bool) -> String {
-    if imperial {
-        format!("{:.3} in", mm / 25.4)
-    } else {
-        format!("{mm:.2} mm")
-    }
+    crate::units::format_millimetres(mm, imperial)
 }
 
 #[cfg(test)]
@@ -325,7 +324,7 @@ mod tests {
         assert!(!summary.is_raining_now);
         assert_eq!(summary.starts_in_minutes, Some(8)); // rain starts at +10
         assert_eq!(summary.ends_in_minutes, Some(13));
-        assert_eq!(summary.pill_text(), "in 8 min");
+        assert_eq!(summary.pill_text(false), "in 8 min");
     }
 
     #[test]
@@ -335,7 +334,7 @@ mod tests {
         assert!(!summary.is_raining_now);
         assert_eq!(summary.starts_in_minutes, None);
         assert_eq!(summary.ends_in_minutes, None);
-        assert_eq!(summary.pill_text(), "dry");
+        assert_eq!(summary.pill_text(false), "dry");
     }
 
     #[test]
