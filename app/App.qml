@@ -467,6 +467,15 @@ Item {
               width: parent.width
               spacing: Style.space(6)
 
+              // Titled like the hours card above it; without a header the day rows read as a
+              // loose list of figures.
+              Text {
+                text: "Next " + root.dailyRows.length + " days"
+                color: root.foreground
+                font.family: Style.font.family
+                font.pixelSize: Style.font.subtitle
+              }
+
               Repeater {
                 model: root.dailyRows
 

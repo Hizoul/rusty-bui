@@ -173,8 +173,14 @@ Item {
 
       delegate: Text {
         id: hourTick
+        // "now" is drawn on the sample the cycle starts in, which is usually the same sample
+        // as the first hour mark; without this the two labels land on exactly the same x and
+        // print "now" and "16:00" on top of each other.
+        readonly property bool sharesNow: root.points.length > 0 && root.hoveredIndex < 0
+          && modelData.index === root.nowIndex
         x: {
           var position = modelData.index * (chart.barWidth + chart.gap)
+          if (sharesNow) position += nowTick.implicitWidth + Style.space(6)
           return Math.min(position, tickRow.width - implicitWidth)
         }
         text: modelData.label
