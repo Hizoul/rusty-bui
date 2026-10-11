@@ -4,5 +4,10 @@ target/
 .cache/
 container/.cache/
 !container/.cache/.gitkeep
+# The CLI's own local state (location, units, saved places) — it is this machine's, not the
+# project's, and running the CLI changes it.
+.config/
 # Rendered by container/render-qml.sh for eyeballing; regenerate rather than commit.
 test/render/out/
+# The harness's Python helpers get imported by the tests that check a render.
+__pycache__/
