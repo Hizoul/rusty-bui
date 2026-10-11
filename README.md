@@ -76,8 +76,16 @@ so all caching and rate limiting stays in one place.
 On the Omarchy machine, from a checkout:
 
 ```bash
-./install.sh --bind      # or without --bind to just print the keybindings
+./install.sh             # build, install both plugins, launcher entry, keybindings
+./install.sh --bind      # …and add the keybindings to ~/.config/hypr/bindings.lua
+./install.sh --dry-run   # say what it would do, write nothing
 ```
+
+Rehearse it first if you like: `--dry-run` stages and validates both plugins, then compares
+the staged trees against what is already installed and says what would be added, updated or
+removed — which is the only way to see that a plugin is a version behind, since the installer
+replaces a plugin's files wholesale. It also needs no toolchain: it reports the build's target
+directory rather than building.
 
 That installs the binary to `~/.local/bin`, stages and validates both plugins into
 `~/.config/omarchy/plugins/`, writes the launcher entry and adds the keybindings to
