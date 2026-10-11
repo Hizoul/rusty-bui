@@ -3,6 +3,7 @@ import QtQuick.Shapes
 import qs.Commons
 import "Model.js" as Model
 import "Basemap.js" as Basemap
+import "Legend.js" as Legend
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The radar map.
@@ -287,6 +288,80 @@ Item {
 
   // ---- the chrome over it --------------------------------------------------
 
+  // What the colours mean: DWD's own bands, in DWD's own colours (qml/Legend.js, generated from
+  // the legend the service publishes), drawn small in the theme's font rather than shipped as
+  // the 100x390 white plate their GetLegendGraphic returns. A map whose colours are unexplained
+  // is a map you have to already know how to read.
+  Rectangle {
+    id: legend
+    anchors.left: body.left
+    anchors.top: body.top
+    anchors.margins: Style.space(4)
+    // Two columns of eight rather than one of fifteen, and no legend at all on a map too narrow
+    // to hold one: this is a caption, not the subject.
+    readonly property var bands: Model.evenColumns(Legend.RAMP, 2)
+    visible: body.width >= Style.space(380)
+    width: legendBody.width + Style.space(10)
+    height: legendBody.height + Style.space(8)
+    radius: Style.cornerRadius
+    color: Model.withAlpha(map.theme.background, 0.72)
+    border.width: 1
+    border.color: Model.withAlpha(map.theme.foreground, 0.16)
+
+    Column {
+      id: legendBody
+      x: Style.space(5)
+      y: Style.space(4)
+      spacing: Style.space(3)
+
+      Text {
+        text: "rain, " + Legend.TITLE
+        color: Model.withAlpha(map.theme.foreground, 0.6)
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+      }
+
+      Row {
+        id: legendColumns
+        spacing: Style.space(6)
+
+        Repeater {
+          model: legend.bands
+
+          delegate: Column {
+            required property var modelData
+            spacing: Style.space(1)
+
+            Repeater {
+              model: modelData
+
+              delegate: Row {
+                required property var modelData
+                spacing: Style.space(3)
+
+                Rectangle {
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.space(10)
+                  height: Style.space(5)
+                  radius: 1
+                  color: modelData.color
+                }
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: Model.rampLabel(modelData.label)
+                  color: Model.withAlpha(map.theme.foreground, 0.85)
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   Row {
     anchors.top: body.top
     anchors.right: body.right
@@ -392,11 +467,16 @@ Item {
     Text {
       id: frameLabel
       anchors.verticalCenter: parent.verticalCenter
-      width: Style.space(34)
+      width: Math.max(Style.space(34), implicitWidth)
       horizontalAlignment: Text.AlignHCenter
-      text: map.frameIndex >= 0 && map.frames.length
-        ? Model.formatClock(map.frames[map.frameIndex], map.clock24)
-        : "–"
+      // The frame's own clock, and how far off it is: the extent runs from an hour or two back
+      // to two hours ahead, so "20:15" alone does not say whether that is past or forecast.
+      text: {
+        if (!(map.frameIndex >= 0 && map.frames.length)) return "–"
+        var clock = Model.formatClock(map.frames[map.frameIndex], map.clock24)
+        var age = Model.frameAge(map.frames[map.frameIndex], Date.now())
+        return age === "" || age === "now" ? clock : clock + " · " + age
+      }
       color: map.theme.foreground
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
@@ -444,7 +524,7 @@ Item {
     Item {
       id: track
       anchors.verticalCenter: parent.verticalCenter
-      width: Math.max(0, stepper.width - Style.space(140))
+      width: Math.max(0, stepper.width - Style.space(190))
       height: Style.space(6)
 
       Rectangle {

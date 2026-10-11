@@ -586,3 +586,40 @@ function nowFrameIndex(framesMs, nowMs) {
   return best
 }
 
+/// How far off that frame is, said the way the rest of the app says it: "in 20 min", "35 min ago",
+/// "now". The stepper's clock already says which frame is on screen; this is the part a person
+/// actually reads, and without it a nowcast frame looks like any other timestamp.
+function frameAge(frameMs, nowMs) {
+  if (!isSet(frameMs)) return ""
+  var at = isSet(nowMs) ? Number(nowMs) : Date.now()
+  var minutes = Math.round((Number(frameMs) - at) / 60000)
+  if (Math.abs(minutes) < 1) return "now"
+  var size = Math.abs(minutes) < 60
+    ? Math.abs(minutes) + " min"
+    : Math.floor(Math.abs(minutes) / 60) + " h " + pad(Math.abs(minutes) % 60)
+  return minutes > 0 ? "in " + size : size + " ago"
+}
+
+/// DWD states its bands as half-open intervals — "[0.1 - 0.2)", ">= 150" — which is precise and
+/// reads like code beside a map. The same thing, said the way a person would say it.
+function rampLabel(label) {
+  var text = String(label === undefined || label === null ? "" : label).replace(/^\s+|\s+$/g, "")
+  var range = text.match(/^\[\s*([0-9.]+)\s*-\s*([0-9.]+)\s*\)$/)
+  if (range) return range[1] + "–" + range[2]
+  var open = text.match(/^>=\s*([0-9.]+)$/)
+  if (open) return "≥" + open[1]
+  return text
+}
+
+/// A legend's entries split into columns of nearly equal height, read down each column. DWD's
+/// ramp is fifteen bands: one column of fifteen is half the map's height, two is a glance.
+function evenColumns(items, count) {
+  var list = items || []
+  var parts = Math.max(1, Math.floor(count))
+  var out = []
+  for (var column = 0; column < parts; column++) out.push([])
+  for (var index = 0; index < list.length; index++)
+    out[Math.floor(index * parts / Math.max(1, list.length))].push(list[index])
+  return out
+}
+

@@ -18,9 +18,14 @@ Three drivers run against whichever case is asked for: `App.qml` (the window), `
 stay apart) and `Pill.qml` (the bar pill and the popout it opens); two cases have drivers of
 their own, because what they show cannot be reached by rendering the window alone — `AppDay.qml`
 clicks a day row to open it, and `Map.qml` renders the map, which is the one card that fetches
-for itself. The fixtures come from `test/fixtures/`, and the payloads have synthetic variants for
+for itself (and grabs it twice: once where it opens, on the frame nearest now, and once at the far
+end of the extent, since the age the stepper adds to a frame's clock is only visible out there).
+The fixtures come from `test/fixtures/`, and the payloads have synthetic variants for
 states a quiet day cannot show (`make-bar-wet.py`, `make-app-alerts.py`, `make-app-daylight.py`
-for a sun that is still up and a moon big enough to see).
+for a sun that is still up and a moon big enough to see). Two more are generators rather than
+fixtures: `make-basemap.py` writes `qml/Basemap.js` from Natural Earth, and
+`make-radar-legend.py` writes `qml/Legend.js` from the ramp DWD publishes — both take `--probe`
+or write the file, and both are re-run rather than hand-edited.
 
 It needs an Omarchy checkout for two reasons: `shell/Commons/{Color,Style,Border,Util}.qml`
 are copied in as the theme singletons — so the render is themed by the code that themes the

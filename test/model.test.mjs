@@ -20,6 +20,10 @@ const appPath = process.argv[3] ?? resolve(here, "fixtures/app-leiden.json")
 // helpers never touch, so a stub is enough to load the file.
 const context = vm.createContext({ Qt: { rgba: (r, g, b, a) => ({ r, g, b, a }) }, console })
 vm.runInContext(readFileSync(modelPath, "utf8"), context, { filename: modelPath })
+// The ramp DWD publishes for the radar layer, as the generator wrote it, so the legend the map
+// draws can be checked against the labels it will be given.
+const legendPath = resolve(here, "../qml/Legend.js")
+vm.runInContext(readFileSync(legendPath, "utf8"), context, { filename: legendPath })
 
 const Model = context
 const payload = readFileSync(barPath, "utf8")
@@ -304,6 +308,31 @@ check(
 )
 check("nonsense illumination is clamped rather than drawn", [Model.moonPath(-1, true, 14), Model.moonPath(2, true, 14).indexOf("1 1") !== -1], ["", true])
 check("a disc with no size draws nothing", Model.moonPath(0.5, true, 0), "")
+
+// ---- the legend and the frame clock
+// The ramp is DWD's, generated from the legend their service publishes; what the map does with
+// it is say it the way a person reads it, and say when the frame on screen is.
+check("the ramp is DWD's own, in their colours", [Model.RAMP.length, Model.RAMP[0].color, Model.RAMP[Model.RAMP.length - 1].color],
+  [15, "#33FFFF", "#0000FE"])
+check("and its bands read as ranges, not as code",
+  [Model.rampLabel("[0.1 - 0.2)"), Model.rampLabel("[ 7.5 - 10 )"), Model.rampLabel(">= 150"), Model.rampLabel("Keine Daten")],
+  ["0.1–0.2", "7.5–10", "≥150", "Keine Daten"])
+check("the ramp splits into two columns of eight and seven",
+  Model.evenColumns(Model.RAMP, 2).map(column => column.length),
+  [8, 7])
+check("with every band in exactly one column",
+  Model.evenColumns(Model.RAMP, 2).flat().length,
+  Model.RAMP.length)
+
+const now = 1791741600000 // 2026-10-11T18:00:00Z
+check("a frame in the future is ahead of us", Model.frameAge(now + 20 * 60000, now), "in 20 min")
+check("a frame in the past was ago", Model.frameAge(now - 35 * 60000, now), "35 min ago")
+check("the frame on screen is now", Model.frameAge(now, now), "now")
+check("half a minute rounds to now rather than to nothing", Model.frameAge(now + 25000, now), "now")
+check("an hour of nowcast reads as hours and minutes",
+  [Model.frameAge(now + 65 * 60000, now), Model.frameAge(now - 125 * 60000, now)],
+  ["in 1 h 05", "2 h 05 ago"])
+check("and a frame with no time says nothing", Model.frameAge(null, now), "")
 
 console.log(failures === 0 ? "\nall model checks passed" : `\n${failures} check(s) failed`)
 process.exit(failures === 0 ? 0 : 1)

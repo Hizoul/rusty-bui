@@ -80,6 +80,23 @@ Window {
         + " frames=" + map.frames.length + " frame=" + map.frameIndex
         + " span=" + (map.view ? map.view.spanLon.toFixed(3) : "null")
         + " basemap=" + (map.basemap ? map.basemap.runs + " runs, " + map.basemap.costMs + " ms" : "null"))
+      Harness.grabAll(driver.outDir, "", false)
+      // Then walk to the far end of the extent: the map opens on the frame nearest now, where
+      // the stepper says only the clock, and the age it adds is only visible further out.
+      if (map.frames.length) map.goToFrame(map.frames.length - 1)
+      lastFrame.start()
+    }
+  }
+
+  Timer {
+    id: lastFrame
+    interval: 400
+    onTriggered: {
+      console.log("harness: at the last frame, " + map.frames.length + " of " + map.frames.length
+        + ", index " + map.frameIndex)
+      // Named apart from the first grab: renaming the window is cleaner than a prefix, which the
+      // harness would staple in front of the window's own name.
+      driver.harnessName = "radar-map-last"
       Harness.grabAll(driver.outDir)
     }
   }

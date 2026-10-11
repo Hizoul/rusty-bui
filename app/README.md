@@ -16,6 +16,7 @@ App.qml         the window: masthead, now, sun and moon, rain nowcast, map, hour
 Card.qml        (shared, from qml/) the themed surface each block sits on
 HourStrip.qml   (shared, from qml/) a row of hours — the one card the day detail shares
 RadarMap.qml    (shared, from qml/) the pannable, zoomable radar map
+Legend.js       (generated) DWD's own rain-rate ramp, from the legend their service publishes
 MoonDisc.qml    (shared, from qml/) the moon, drawn from two arcs
 Basemap.js      (generated) Natural Earth coastlines and borders, projected at runtime
 ```
@@ -36,7 +37,11 @@ and one round of cache-aware requests:
 - **Rain nowcast** — the same `NowcastChart.qml` the bar popout draws: one bar per radar
   frame, hour ticks, a now marker, mm/h axis, plus the sentence and the status line.
 - **Rain map** — DWD's radar composite over a vendored coastline, drag to move it, wheel to
-  zoom, and a stepper that walks the frames from an hour back to the end of the nowcast.
+  zoom, and a stepper that walks the frames from an hour back to the end of the nowcast. The
+  stepper's clock carries how far off that frame is ("18:38 · in 25 min"), since the extent runs
+  both ways from now, and a legend in the corner gives DWD's own rain-rate bands in their own
+  colours — read from the legend the service publishes rather than redrawn from memory, so the
+  two cannot disagree.
 - **Next hours** — a scrollable strip with the glyph, temperature and precipitation
   probability per hour. Day and night glyphs come from the computed sun times, not a clock
   window.
