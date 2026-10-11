@@ -163,7 +163,10 @@ Item {
     anchors.right: parent.right
     anchors.top: chart.bottom
     anchors.topMargin: Style.space(3)
-    height: Math.max(nowTick.height, hourTick.height)
+    // Every tick shares one font size, and an id inside a Repeater delegate is not
+    // reachable from out here — asking a tick for its height is a ReferenceError, so the
+    // row measures the font and its own label instead.
+    height: Math.max(nowTick.implicitHeight, Style.font.caption)
 
     Repeater {
       model: root.hourMarks

@@ -169,6 +169,9 @@ Item {
     color: root.background
     implicitWidth: Style.space(620)
     implicitHeight: Style.space(780)
+    // The shape Omarchy's own dev-gallery uses; Quickshell's FloatingWindow adds both to
+    // QQuickWindow, so the window still has to be checked against the real shell and not
+    // only against the render-harness stub.
     minimumSize: Qt.size(Style.space(480), Style.space(480))
 
     onVisibleChanged: {

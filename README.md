@@ -55,7 +55,12 @@ The QML is checked without a running shell:
 ```bash
 node test/model.test.mjs                          # payload and label logic
 container/check-qml.sh /path/to/omarchy-checkout  # manifests + QML against the real shell
+container/render-qml.sh /path/to/omarchy-checkout # render offscreen: PNGs in test/render/out
 ```
+
+The last one runs the real QML against captured payloads inside a stubbed shell and writes
+images, which is how a `ReferenceError` in the chart and an unresolved `Card` were caught.
+Caveats and stub fidelity: `test/render/README.md`.
 
 ## The Omarchy plugins
 

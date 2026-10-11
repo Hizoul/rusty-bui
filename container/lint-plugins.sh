@@ -75,10 +75,20 @@ for type in Process StdioCollector ShellIpc; do
 done
 
 # ── QML ───────────────────────────────────────────────────────────────────────
+# qmllint's noise floor in this setup is high (dynamic QML: `unqualified`,
+# `missing-property`, `import`, `unresolved-type` for Quickshell's own types), so instead
+# of chasing a zero, fail on the two shapes that mean our own code is broken: a component
+# we reference that did not make it into the plugin, and a missing base type.
+log=/tmp/qmllint.log
 for plugin in "$@"; do
   for file in "$plugin"/*.qml; do
     echo "== $(basename "$plugin")/$(basename "$file") (against the Omarchy sources)"
-    "$qmllint_bin" -I "$qsroot" -I "$qsstub" "$file" || status=1
+    if "$qmllint_bin" -I "$qsroot" -I "$qsstub" "$file" >"$log" 2>&1; then :; else status=1; fi
+    cat "$log"
+    if grep -q "is not a type" "$log"; then
+      echo "   !! $(basename "$file") references a component that is not in the plugin" >&2
+      status=1
+    fi
   done
 done
 

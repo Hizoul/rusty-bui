@@ -78,8 +78,9 @@ or **Model © Open-Meteo**, all CC BY 4.0. The location is whatever
 ## Checking it
 
 ```bash
-node test/model.test.mjs                          # payload/label logic, no shell needed
+node test/model.test.mjs                          # payload and label logic, no shell needed
 container/check-qml.sh /path/to/omarchy-checkout  # manifests + QML against the real shell
+container/render-qml.sh /path/to/omarchy-checkout # render it offscreen; PNGs in test/render/out
 ```
 
 `check-qml.sh` stages both plugins exactly as `install.sh` does, validates each manifest
@@ -87,3 +88,7 @@ with Omarchy's own `omarchy-plugin-validate`, and type-checks the QML against an
 source tree. Unresolved `Quickshell` imports are expected there (Quickshell is not
 installed in the build container) and are stubbed, so the `qs.Commons` and `qs.Ui` members
 resolve — which is what catches typos in theme tokens and base-type properties.
+
+`render-qml.sh` goes further and actually runs the QML, against captured payloads, inside a
+stubbed shell — which is how the `ReferenceError` in the chart and the missing `Card.qml`
+were found. See `test/render/README.md`.

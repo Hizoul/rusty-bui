@@ -92,6 +92,18 @@ check("blank output is a failure, not a crash", Model.parseView("").ok, false)
 check("garbage is reported, not thrown", Model.parseView("{oops").ok, false)
 check("an empty point list is a failure", Model.parseView('{"points":[]}').ok, false)
 
+// ---- the synthetic "rain later" fixture the render harness feeds the pill
+// (test/fixtures/make-bar-wet.py rewrites the captured dry payload's rates; this keeps the
+// hand-made summary consistent with the frames it ships with)
+const wetFixture = Model.parseView(readFileSync(resolve(here, "fixtures/bar-wet-synthetic.json"), "utf8"))
+check("the synthetic wet fixture parses", wetFixture.ok, true)
+check(
+  "…and its summary agrees with its own frames",
+  wetFixture.view.summary.startsInMinutes,
+  wetFixture.view.points.find((point) => point.mmPerHour >= 0.1).offsetMinutes
+)
+check("…and it draws a wait rather than a rate", Model.pillText(wetFixture.view).indexOf("\ue318") === 0, true)
+
 // ---- the app payload (`rustybui app`)
 const app = Model.parseApp(appPayload)
 check("parses the captured app payload", app.ok, true)

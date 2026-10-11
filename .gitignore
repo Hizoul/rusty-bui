@@ -4,3 +4,5 @@ target/
 .cache/
 container/.cache/
 !container/.cache/.gitkeep
+# Rendered by container/render-qml.sh for eyeballing; regenerate rather than commit.
+test/render/out/
