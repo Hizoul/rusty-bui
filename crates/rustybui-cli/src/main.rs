@@ -49,6 +49,9 @@ enum Command {
     App(AppArgs),
     /// Air quality (European AQI).
     Air(LocationArgs),
+
+    /// Weather warnings in force for a location, worst first.
+    Alerts(LocationArgs),
     /// Find a place by name (Open-Meteo geocoding).
     Search(SearchArgs),
     /// Store the default location used when --lat/--lon are omitted.
@@ -255,10 +258,11 @@ Open-Meteo returned nothing"
 
             // All three in flight at once: separate providers, one payload, and the
             // per-provider gate still paces whatever actually leaves the machine.
-            let (nowcast, forecast, air) = tokio::join!(
+            let (nowcast, forecast, air, alerts) = tokio::join!(
                 service.nowcast(&location, cli.refresh),
                 service.forecast(&location, &timezone),
                 client.fetch_air_quality(&location),
+                service.alerts(&location),
             );
 
             let mut errors = Vec::new();
@@ -276,6 +280,15 @@ Open-Meteo returned nothing"
                     None
                 }
             };
+            // Warnings are the one part a screen can do without: an error here leaves the
+            // list empty rather than taking the window down with it.
+            let alerts = match alerts {
+                Ok(alerts) => alerts,
+                Err(error) => {
+                    errors.push(format!("alerts: {error}"));
+                    Vec::new()
+                }
+            };
             if nowcast.is_none() {
                 errors.push("nowcast: no radar or model coverage for this location".to_string());
             }
@@ -287,6 +300,7 @@ Open-Meteo returned nothing"
                     nowcast: nowcast.as_ref(),
                     forecast: forecast.as_ref().map(|(forecast, _)| forecast),
                     forecast_provider: forecast.as_ref().map(|(_, provider)| *provider),
+                    alerts: &alerts,
                     air: air.as_ref(),
                     errors,
                 },
@@ -295,6 +309,13 @@ Open-Meteo returned nothing"
             );
 
             if args.text {
+                // Warnings first: they are the one thing here that changes what a reader does.
+                for alert in &view.alerts {
+                    println!(
+                        "warning: {} — {} ({})",
+                        alert.severity_label, alert.event, alert.window_label
+                    );
+                }
                 print_app(&view);
             } else {
                 println!("{}", serde_json::to_string(&view)?);
@@ -324,6 +345,30 @@ Open-Meteo returned nothing"
                     air.pm2_5_ug_m3.map_or("-".to_string(), |v| format!("{v:.1}")),
                     air.pm10_ug_m3.map_or("-".to_string(), |v| format!("{v:.1}"))
                 );
+            }
+        }
+
+        Command::Alerts(args) => {
+            let location = resolve_location(args.lat, args.lon, args.name, &config)?;
+            let service = service(cli.knmi_key, cli.offline)?;
+            let alerts = service.alerts(&location).await?;
+
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&alerts)?);
+            } else if alerts.is_empty() {
+                println!("Warnings · {}: none in force", location.name);
+            } else {
+                println!("Warnings · {} · {} in force", location.name, alerts.len());
+                for alert in &alerts {
+                    println!("  {} — {}", alert.severity.label(), alert.event);
+                    if !alert.headline.is_empty() {
+                        println!("      {}", alert.headline);
+                    }
+                    if let Some(instruction) = &alert.instruction {
+                        println!("      {}", instruction);
+                    }
+                }
+                println!("  source       : {}", alerts[0].attribution);
             }
         }
 
@@ -427,14 +472,30 @@ fn resolve_location(
     match (lat, lon) {
         (Some(latitude), Some(longitude)) => {
             let default = config.location.clone();
+            // Bare coordinates inherit the stored place's country and zone only when they are
+            // that place — the same name, or no name at all. Inheriting a *different* place's
+            // country sent a Dutch request about Leiden to DWD, which answered 404.
+            let same_place = match (&default, &name) {
+                (Some(stored), Some(given)) => stored.name.eq_ignore_ascii_case(given),
+                (Some(_), None) => true,
+                _ => false,
+            };
+            let from_default = |pick: fn(&Location) -> Option<String>| {
+                if same_place {
+                    default.as_ref().and_then(pick)
+                } else {
+                    None
+                }
+            };
+
             Ok(Location {
                 name: name
                     .or_else(|| default.as_ref().map(|l| l.name.clone()))
                     .unwrap_or_else(|| format!("{latitude:.4}, {longitude:.4}")),
                 latitude,
                 longitude,
-                country_code: default.and_then(|l| l.country_code),
-                timezone: None,
+                country_code: from_default(|l| l.country_code.clone()),
+                timezone: from_default(|l| l.timezone.clone()),
             })
         }
         (None, None) => match (config.location.clone(), name) {

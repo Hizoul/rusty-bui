@@ -46,15 +46,30 @@ QMLDIR
 
 # Payloads the binary produces, as a JS library the Process stub serves.
 case "$case_name" in
-  wet) bar_fixture=bar-wet-synthetic.json ;;
-  dry) bar_fixture=bar-dry.json ;;
-  *) echo "unknown case: $case_name (expected dry or wet)" >&2; exit 2 ;;
+  dry)
+    bar_fixture=bar-dry.json
+    app_fixture=app-leiden.json
+    ;;
+  wet)
+    bar_fixture=bar-wet-synthetic.json
+    app_fixture=app-leiden.json
+    ;;
+  alerts)
+    # The captured app payload was taken on a quiet day; this case adds warnings so the
+    # card that shows them can be rendered and looked at.
+    bar_fixture=bar-wet-synthetic.json
+    app_fixture=app-alerts-synthetic.json
+    ;;
+  *)
+    echo "unknown case: $case_name (expected dry, wet or alerts)" >&2
+    exit 2
+    ;;
 esac
 {
   printf '.pragma library\n\n'
   # JSON is a subset of JS, so the payloads can be inlined verbatim.
   printf 'var app = '
-  cat "$repo/test/fixtures/app-leiden.json"
+  cat "$repo/test/fixtures/$app_fixture"
   printf '\n\nvar bar = '
   cat "$repo/test/fixtures/$bar_fixture"
   printf '\n'

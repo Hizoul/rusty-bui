@@ -243,6 +243,112 @@ Item {
             }
           }
 
+          // ---- warnings ------------------------------------------------------
+          // Only when there are any: an empty card would push everything down to say nothing.
+          Card {
+            id: warnings
+            width: parent.width
+            visible: root.view !== null && root.view.alerts && root.view.alerts.length > 0
+            // The theme's urgent role, tinted, so a warning reads as one at a glance.
+            color: Model.withAlpha(root.urgent, 0.14)
+            borderSpec: Border.surfaceSpec("popups", "border", root.urgent, Math.max(1, Style.space(1)))
+
+            Column {
+              width: parent.width
+              spacing: Style.space(8)
+
+              Text {
+                id: alertsHeading
+                text: {
+                  if (!root.view) return ""
+                  var count = root.view.alerts.length
+                  return count === 1 ? "1 warning in force" : count + " warnings in force"
+                }
+                color: root.foreground
+                font.family: Style.font.family
+                font.pixelSize: Style.font.subtitle
+              }
+
+              Repeater {
+                model: (root.view && root.view.alerts) ? root.view.alerts : []
+
+                delegate: Column {
+                  width: parent.width
+                  spacing: Style.space(3)
+
+                  Item {
+                    width: parent.width
+                    height: Math.max(alertsHeading.implicitHeight, alertEvent.implicitHeight)
+
+                    Text {
+                      id: alertSeverity
+                      anchors.left: parent.left
+                      anchors.verticalCenter: parent.verticalCenter
+                      // Severe and extreme get the urgent colour; the milder two the accent.
+                      text: modelData.severityLabel
+                      color: modelData.severityRank >= 2 ? root.urgent : root.accent
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      width: Style.space(58)
+                    }
+
+                    Text {
+                      id: alertEvent
+                      anchors.left: alertSeverity.right
+                      anchors.right: alertWindow.left
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: modelData.event
+                      color: root.foreground
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.body
+                      elide: Text.ElideRight
+                    }
+
+                    Text {
+                      id: alertWindow
+                      anchors.right: parent.right
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: modelData.windowLabel
+                      color: root.muted(0.6)
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+                  }
+
+                  Text {
+                    width: parent.width
+                    text: modelData.headline || ""
+                    color: root.muted(0.85)
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                    wrapMode: Text.WordWrap
+                  }
+
+                  Text {
+                    width: parent.width
+                    text: modelData.detail || ""
+                    color: root.muted(0.55)
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                    wrapMode: Text.WordWrap
+                    maximumLineCount: 3
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    width: parent.width
+                    visible: text !== ""
+                    text: modelData.instruction || ""
+                    color: root.accent
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                    wrapMode: Text.WordWrap
+                  }
+                }
+              }
+            }
+          }
+
           // ---- now ------------------------------------------------------------
           Card {
             width: parent.width

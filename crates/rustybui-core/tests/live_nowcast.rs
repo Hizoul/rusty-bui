@@ -407,3 +407,28 @@ async fn a_german_location_reads_dwd_and_a_dutch_one_does_not() {
     assert_eq!(aachen_provider, ForecastProvider::Dwd);
     println!("Aachen: {}", aachen_provider.display_name());
 }
+
+#[tokio::test]
+#[ignore = "live provider chain"]
+async fn warnings_come_from_dwd_and_nowhere_else() {
+    let service = live_service();
+
+    // Berlin is inside DWD's warn cells: a real answer, which on a quiet day is an empty list.
+    let german = service.alerts(&berlin()).await.expect("Berlin warnings");
+    for alert in &german {
+        assert!(!alert.event.is_empty(), "a warning with no event");
+        assert!(!alert.id.is_empty(), "a CAP warning with no identifier");
+        assert!(!alert.attribution.is_empty(), "a warning with no attribution");
+        assert!(alert.onset.is_some() || alert.expires.is_some(), "a warning with no window");
+    }
+    // Worst first, so a screen showing one shows the one that matters.
+    for pair in german.windows(2) {
+        assert!(pair[0].severity.rank() >= pair[1].severity.rank(), "warnings out of order");
+    }
+    println!("Berlin: {} warning(s) in force", german.len());
+
+    // Leiden is outside them, and KNMI's warnings need a key, so nothing is asked and
+    // nothing is reported: an empty list, not an error.
+    let dutch = service.alerts(&leiden()).await.expect("Leiden warnings");
+    assert!(dutch.is_empty(), "expected no warnings for a location DWD does not cover");
+}

@@ -6,6 +6,7 @@
 //! reports it), so no timezone database is needed and a location in another zone
 //! still reads correctly, and every instant also ships as epoch milliseconds.
 
+use crate::alerts::Alert;
 use crate::forecast::{DailyForecast, Forecast, HourlyForecast};
 use crate::location::Location;
 use crate::nowcast::RainNowcast;
@@ -336,12 +337,56 @@ impl From<&AirQuality> for AirQualityView {
     }
 }
 
+/// One warning, as a screen shows it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlertView {
+    pub event: String,
+    pub headline: String,
+    pub severity_label: String,
+    /// 0–3 — minor, moderate, severe, extreme — so a screen can pick a colour band without
+    /// reading English, and show the worst first.
+    pub severity_rank: u8,
+    /// When it applies, in the location's own time: "08:00–19:00", "until 19:00", …
+    pub window_label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instruction: Option<String>,
+}
+
+impl AlertView {
+    pub fn new(alert: &Alert, offset: FixedOffset) -> Self {
+        let clock = |value: Option<DateTime<Utc>>| {
+            value.map(|time| time.with_timezone(&offset).format("%H:%M").to_string())
+        };
+        let window_label = match (clock(alert.onset), clock(alert.expires)) {
+            (Some(onset), Some(expires)) => format!("{onset}–{expires}"),
+            (Some(onset), None) => format!("from {onset}"),
+            (None, Some(expires)) => format!("until {expires}"),
+            (None, None) => "in force".to_string(),
+        };
+
+        Self {
+            event: alert.event.clone(),
+            headline: alert.headline.clone(),
+            severity_label: alert.severity.label().to_string(),
+            severity_rank: alert.severity.rank(),
+            window_label,
+            detail: alert.description.clone(),
+            instruction: alert.instruction.clone(),
+        }
+    }
+}
+
 /// Everything one screen needs, in one payload and one process spawn.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppView {
     pub location: LocationView,
     pub generated_at_ms: i64,
+    /// Warnings in force, worst first. Empty is the normal case.
+    pub alerts: Vec<AlertView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nowcast: Option<NowcastView>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -362,6 +407,8 @@ pub struct AppParts<'a> {
     pub forecast: Option<&'a Forecast>,
     /// Which provider answered `forecast`, so the screen can attribute what it shows.
     pub forecast_provider: Option<ForecastProvider>,
+    /// Warnings in force, worst first.
+    pub alerts: &'a [Alert],
     pub air: Option<&'a AirQuality>,
     pub errors: Vec<String>,
 }
@@ -374,9 +421,22 @@ impl AppView {
         hours: usize,
         imperial: bool,
     ) -> Self {
+        let offset = parts
+            .forecast
+            .map(|forecast| forecast.utc_offset_seconds)
+            .and_then(|seconds| FixedOffset::east_opt(seconds as i32))
+            .unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+
         Self {
             location: LocationView::from(location),
             generated_at_ms: now.timestamp_millis(),
+            // The forecast carries the location's zone offset; without one, warning times
+            // read in UTC rather than in an invented zone.
+            alerts: parts
+                .alerts
+                .iter()
+                .map(|alert| AlertView::new(alert, offset))
+                .collect(),
             nowcast: parts
                 .nowcast
                 .map(|nowcast| NowcastView::new(location, nowcast, now)),
@@ -556,6 +616,7 @@ mod tests {
                 nowcast: Some(&nowcast),
                 forecast: Some(&forecast()),
                 forecast_provider: Some(ForecastProvider::Dwd),
+                alerts: &[],
                 air: Some(&air),
                 errors: vec!["forecast: stale".to_string()],
             },

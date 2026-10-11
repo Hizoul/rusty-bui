@@ -1,18 +1,19 @@
 //! Provider clients — only the three this port supports: KNMI, DWD (via Bright
 //! Sky) and Open-Meteo.
 
-pub mod dwd_forecast;
+pub mod brightsky;
 pub mod dwd_radar;
 pub mod http;
 pub mod knmi;
 pub mod openmeteo;
 
-pub use dwd_forecast::DwdForecastClient;
+pub use brightsky::BrightSkyClient;
 pub use dwd_radar::DwdRadarClient;
 pub use http::{FetchStats, HttpClient, Source};
 pub use knmi::KnmiNowcastClient;
 pub use openmeteo::OpenMeteoClient;
 
+use crate::alerts::Alert;
 use crate::cache::{cycle_start, DiskCache, ResponseCache};
 use crate::forecast::Forecast;
 use crate::location::Location;
@@ -99,18 +100,18 @@ pub struct NowcastService {
 struct ClientSet {
     knmi: KnmiNowcastClient,
     dwd: DwdRadarClient,
-    dwd_forecast: DwdForecastClient,
+    brightsky: BrightSkyClient,
     openmeteo: OpenMeteoClient,
 }
 
 impl ClientSet {
     fn new(knmi_api_key: &Option<String>, responses: &ResponseCache) -> ProviderResult<Self> {
-        // One DWD client for both DWD consumers: one gate, one set of counters.
+        // One DWD client for all three DWD consumers: one gate, one set of counters.
         let dwd_http = HttpClient::new("DWD", responses.clone())?;
         Ok(Self {
             knmi: KnmiNowcastClient::new(knmi_api_key.clone(), responses.clone())?,
             dwd: DwdRadarClient::with_http(dwd_http.clone()),
-            dwd_forecast: DwdForecastClient::new(dwd_http),
+            brightsky: BrightSkyClient::new(dwd_http),
             openmeteo: OpenMeteoClient::new(responses.clone())?,
         })
     }
@@ -242,7 +243,7 @@ impl NowcastService {
         for provider in order {
             let attempt = match provider {
                 ForecastProvider::Dwd => {
-                    self.clients.dwd_forecast.fetch_forecast(location, timezone).await
+                    self.clients.brightsky.fetch_forecast(location, timezone).await
                 }
                 ForecastProvider::OpenMeteo => {
                     self.clients.openmeteo.fetch_forecast(location, timezone).await
@@ -280,5 +281,22 @@ impl NowcastService {
             provider: "forecast",
             reason: "no provider answered".to_string(),
         }))
+    }
+
+    /// The weather warnings in force for `location`, worst first.
+    ///
+    /// Only DWD issues these through a keyless source, and only for its own warn cells: a
+    /// position outside them is answered with a 404 rather than an empty list, so places DWD
+    /// does not report on are not asked at all — no request, and no "alerts failed" line on a
+    /// screen in Leiden that is showing the weather perfectly well otherwise.
+    pub async fn alerts(&self, location: &Location) -> ProviderResult<Vec<Alert>> {
+        if !location.prefers_dwd_forecast() {
+            provider_log!("DWD does not warn for {}, so no warnings are fetched", location.key());
+            return Ok(Vec::new());
+        }
+
+        let alerts = self.clients.brightsky.fetch_alerts(location).await?;
+        provider_log!("{} warnings in force for {}", alerts.len(), location.key());
+        Ok(alerts)
     }
 }

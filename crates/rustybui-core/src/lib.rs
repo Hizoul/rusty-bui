@@ -1,6 +1,7 @@
 //! Core data layer for rusty-bui: a Rust port of WeatherMaster's weather
 //! pipeline for KNMI, DWD (Bright Sky) and Open-Meteo. No UI, no CLI.
 
+pub mod alerts;
 pub mod cache;
 pub mod forecast;
 pub mod location;
@@ -15,6 +16,8 @@ pub use appview::{
     ForecastView, HourlyView,
 };
 
+pub use alerts::{Alert, AlertSeverity};
+
 pub use cache::{
     cycle_start, request_key, snap_to_cycle, DiskCache, ResponseCache, NOWCAST_CYCLE_SECONDS,
     RESPONSE_FRESH_SECONDS, RESPONSE_MAX_STALE_SECONDS,
@@ -26,7 +29,7 @@ pub use nowcast::{
     NowcastPoint, NowcastProvider, NowcastSummary, RainNowcast, RAIN_THRESHOLD_MM_H,
 };
 pub use providers::{
-    DwdForecastClient, DwdRadarClient, FetchStats, ForecastProvider, HttpClient, KnmiNowcastClient,
+    BrightSkyClient, DwdRadarClient, FetchStats, ForecastProvider, HttpClient, KnmiNowcastClient,
     NowcastService, OpenMeteoClient, ProviderError, Source,
 };
 pub use view::NowcastView;
