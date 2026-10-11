@@ -22,7 +22,7 @@ air quality, geocoding, minutely-15 nowcast fallback, worldwide).
 ```
 crates/rustybui-core   domain types, providers, caches (no UI, no CLI)
 crates/rustybui-cli    `rustybui` binary: nowcast / forecast / air / search / bar / cache
-omarchy/               bar-widget plugin (manifest.json + QML)          [planned]
+omarchy/               bar-widget plugin: pill, popout, chart, install script
 app/                   standalone Quickshell window app                 [planned]
 qml/                   QML components shared by the plugin and the app  [planned]
 container/             Containerfile + helper scripts for podman
@@ -42,6 +42,30 @@ container/run.sh cargo run -p rustybui-cli -- nowcast --lat 52.16 --lon 4.49
 Live tests hit the real endpoints, so they share one persistent cache directory
 (`.cache/live-tests`, git-ignored): a repeat run inside the same radar cycle sends no
 requests at all.
+
+The QML is checked without a running shell:
+
+```bash
+node omarchy/test/model.test.mjs                   # payload and label logic
+container/check-qml.sh /path/to/omarchy-checkout   # manifest + QML against the real shell
+```
+
+## The Omarchy bar widget
+
+`omarchy/` is an Omarchy 4 plugin: a pill with the rain nowcast for the stored location
+and a popout with the two-hour chart. It owns no fetching — it runs `rustybui bar
+--json` and renders the result, so all caching and rate limiting stays in one place.
+
+On the Omarchy machine, from a checkout:
+
+```bash
+omarchy/install.sh --bind      # or without --bind to just print the keybinding
+```
+
+That installs the binary to `~/.local/bin`, drops the plugin into
+`~/.config/omarchy/plugins/mmb.rainnowcast/`, enables it on the bar's right side and adds
+`SUPER + SHIFT + R` to `~/.config/hypr/bindings.lua`. See `omarchy/README.md` for the
+settings (`binaryPath`, `pollMinutes`, `clock24`) and the attribution rules.
 
 ## Usage
 

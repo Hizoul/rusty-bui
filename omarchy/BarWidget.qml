@@ -1,0 +1,96 @@
+import QtQuick
+import qs.Commons
+import qs.Ui
+
+// Bar pill for the two-hour rain nowcast.
+//
+// Shape mirrors the built-in omarchy.weather widget: the shell routes
+// open/close/toggle through these functions on the bar-widget root
+// (`Bar.findPanelWidget` needs open/close/opened), and the detail popout lives in
+// Panel.qml, loaded here so it can be injected with the bar, its settings and the
+// pill as the popout anchor.
+BarWidget {
+  id: root
+  moduleName: "mmb.rainnowcast"
+
+  function injectPanel() {
+    var target = panelLoader.item
+    if (!target) return
+    if ("bar" in target) target.bar = root.bar
+    if ("settings" in target) target.settings = root.settings
+    if ("anchorItem" in target) target.anchorItem = button
+    if ("hostWidget" in target) target.hostWidget = root
+    if ("binaryPath" in target) target.binaryPath = String(root.setting("binaryPath", "rustybui"))
+    if ("pollMinutes" in target) target.pollMinutes = Number(root.setting("pollMinutes", 5))
+    if ("clock24" in target) target.clock24 = root.setting("clock24", true) !== false
+  }
+
+  function refresh() {
+    if (panelLoader.item && panelLoader.item.refresh) panelLoader.item.refresh()
+  }
+
+  function togglePanel() {
+    if (panelLoader.item && panelLoader.item.toggle) panelLoader.item.toggle()
+  }
+
+  // Summon/hide routing: the bar identifies this widget as the panel's identity,
+  // so `omarchy-shell shell toggle mmb.rainnowcast` and `{ panel = ... }` binds
+  // resolve here.
+  readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
+
+  function open() {
+    if (panelLoader.item && panelLoader.item.openFromHotkey) panelLoader.item.openFromHotkey()
+  }
+
+  function close() {
+    if (panelLoader.item && panelLoader.item.close) panelLoader.item.close()
+  }
+
+  // Forwarded so this widget can stand in for the panel as the bar's popout:
+  // Bar.requestPopout prefers closeForPopoutSwitch over close.
+  readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
+
+  function closeForPopoutSwitch() {
+    if (panelLoader.item) panelLoader.item.closeForPopoutSwitch()
+  }
+
+  // Hidden until the first payload lands, so an unreachable binary shows nothing
+  // rather than a reassuring "dry".
+  visible: panelLoader.item ? panelLoader.item.label !== "" : false
+  implicitWidth: button.implicitWidth
+  implicitHeight: button.implicitHeight
+
+  onBarChanged: injectPanel()
+  onSettingsChanged: injectPanel()
+
+  Loader {
+    id: panelLoader
+    active: true
+    source: Qt.resolvedUrl("Panel.qml")
+    visible: false
+    onLoaded: {
+      root.injectPanel()
+      Qt.callLater(root.injectPanel)
+    }
+  }
+
+  // A text pill rather than the icon-only slot: the point of this widget is the
+  // number — the current rate when it rains, the wait when it does not.
+  WidgetButton {
+    id: button
+    anchors.fill: parent
+    bar: root.bar
+    text: panelLoader.item ? panelLoader.item.label : ""
+    tooltipText: panelLoader.item ? panelLoader.item.tooltip : ""
+    // The label opens with an icon-font glyph, whose figure metrics say nothing
+    // about the glyph.
+    centerFigures: false
+    fontSize: Style.font.body
+
+    onPressed: function(b) {
+      if (!root.bar) return
+      if (b === Qt.MiddleButton) root.refresh()
+      else root.togglePanel()
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "mmb.rainnowcast",
+  "name": "Rain nowcast",
+  "version": "0.1.0",
+  "author": "rusty-bui",
+  "description": "Two-hour rain nowcast from KNMI/DWD radar (Open-Meteo model outside radar coverage), with a detail popout on the bar",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Rain nowcast",
+    "description": "Rain for the next two hours, at radar resolution",
+    "category": "Info",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "binaryPath": "rustybui",
+      "pollMinutes": 5,
+      "clock24": true
+    }
+  }
+}
