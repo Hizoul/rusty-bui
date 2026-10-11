@@ -71,8 +71,24 @@ pub struct HttpClient {
     cache: ResponseCache,
     min_gap: Duration,
     budget_per_minute: u32,
-    gate: Mutex<Gate>,
+    // Shared, not owned: one source gets one gate and one set of counters even when
+    // several clients talk to it (DWD's radar and its forecast both go to Bright Sky).
+    gate: Arc<Mutex<Gate>>,
     stats: FetchStats,
+}
+
+impl Clone for HttpClient {
+    fn clone(&self) -> Self {
+        Self {
+            provider: self.provider,
+            http: self.http.clone(),
+            cache: self.cache.clone(),
+            min_gap: self.min_gap,
+            budget_per_minute: self.budget_per_minute,
+            gate: Arc::clone(&self.gate),
+            stats: self.stats.clone(),
+        }
+    }
 }
 
 impl HttpClient {
@@ -101,11 +117,11 @@ impl HttpClient {
             cache,
             min_gap,
             budget_per_minute,
-            gate: Mutex::new(Gate {
+            gate: Arc::new(Mutex::new(Gate {
                 last_request: None,
                 window_start: Instant::now(),
                 window_count: 0,
-            }),
+            })),
             stats: FetchStats::default(),
         })
     }
