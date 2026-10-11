@@ -657,7 +657,15 @@ Item {
             Text {
               width: parent.width
               visible: root.view !== null
-              text: root.nowcast ? root.nowcast.provider.attribution + " (CC BY 4.0)" : "© Open-Meteo (CC BY 4.0)"
+              text: {
+                // Name whichever providers actually answered, since a German location reads
+                // DWD's model and a Dutch one Open-Meteo's.
+                var parts = []
+                if (root.nowcast) parts.push(root.nowcast.provider.attribution)
+                if (root.view && root.view.forecastAttribution) parts.push(root.view.forecastAttribution)
+                if (parts.length === 0) parts.push("© Open-Meteo")
+                return parts.join(" · ") + " (CC BY 4.0)"
+              }
               color: root.muted(0.35)
               font.family: Style.font.family
               font.pixelSize: Style.font.caption

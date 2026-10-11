@@ -10,6 +10,7 @@ use crate::forecast::{DailyForecast, Forecast, HourlyForecast};
 use crate::location::Location;
 use crate::nowcast::RainNowcast;
 use crate::providers::openmeteo::AirQuality;
+use crate::providers::ForecastProvider;
 use crate::view::{LocationView, NowcastView};
 use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize};
@@ -345,6 +346,9 @@ pub struct AppView {
     pub nowcast: Option<NowcastView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub forecast: Option<ForecastView>,
+    /// Who supplied the forecast — DWD's own model or Open-Meteo — for the footer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forecast_attribution: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub air: Option<AirQualityView>,
     /// Anything that failed, so a screen can say so instead of showing gaps.
@@ -356,6 +360,8 @@ pub struct AppView {
 pub struct AppParts<'a> {
     pub nowcast: Option<&'a RainNowcast>,
     pub forecast: Option<&'a Forecast>,
+    /// Which provider answered `forecast`, so the screen can attribute what it shows.
+    pub forecast_provider: Option<ForecastProvider>,
     pub air: Option<&'a AirQuality>,
     pub errors: Vec<String>,
 }
@@ -377,6 +383,9 @@ impl AppView {
             forecast: parts
                 .forecast
                 .map(|forecast| ForecastView::new(forecast, now, hours, imperial)),
+            forecast_attribution: parts
+                .forecast_provider
+                .map(|provider| provider.attribution().to_string()),
             air: parts.air.map(AirQualityView::from),
             errors: parts.errors,
         }
@@ -546,6 +555,7 @@ mod tests {
             AppParts {
                 nowcast: Some(&nowcast),
                 forecast: Some(&forecast()),
+                forecast_provider: Some(ForecastProvider::Dwd),
                 air: Some(&air),
                 errors: vec!["forecast: stale".to_string()],
             },

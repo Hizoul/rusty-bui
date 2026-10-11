@@ -26,8 +26,8 @@ pub use nowcast::{
     NowcastPoint, NowcastProvider, NowcastSummary, RainNowcast, RAIN_THRESHOLD_MM_H,
 };
 pub use providers::{
-    DwdRadarClient, FetchStats, HttpClient, KnmiNowcastClient, NowcastService, OpenMeteoClient,
-    ProviderError, Source,
+    DwdForecastClient, DwdRadarClient, FetchStats, ForecastProvider, HttpClient, KnmiNowcastClient,
+    NowcastService, OpenMeteoClient, ProviderError, Source,
 };
 pub use view::NowcastView;
 

@@ -57,7 +57,13 @@ pub struct DwdRadarClient {
 
 impl DwdRadarClient {
     pub fn new(cache: ResponseCache) -> ProviderResult<Self> {
-        Ok(Self { http: HttpClient::new("DWD", cache)? })
+        Ok(Self::with_http(HttpClient::new("DWD", cache)?))
+    }
+
+    /// Share a client — and with it DWD's politeness gate and counters — with another
+    /// DWD consumer, such as the forecast client.
+    pub fn with_http(http: HttpClient) -> Self {
+        Self { http }
     }
 
     /// Response counters for this client.

@@ -8,6 +8,12 @@ pub const KNMI_BBOX_MAX_LON: f64 = 7.5;
 pub const KNMI_BBOX_MIN_LAT: f64 = 50.5;
 pub const KNMI_BBOX_MAX_LAT: f64 = 54.0;
 
+/// A coarse box around Germany, with a margin, for choosing DWD's forecast.
+pub const GERMANY_BBOX_MIN_LON: f64 = 5.5;
+pub const GERMANY_BBOX_MAX_LON: f64 = 15.5;
+pub const GERMANY_BBOX_MIN_LAT: f64 = 47.0;
+pub const GERMANY_BBOX_MAX_LAT: f64 = 55.2;
+
 /// A place the app fetches weather for.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Location {
@@ -49,6 +55,19 @@ impl Location {
     /// coordinates inside the radar grid — same rule as the Android app.
     pub fn in_knmi_coverage(&self) -> bool {
         matches!(self.country_code.as_deref(), Some("NL")) || self.in_knmi_bbox()
+    }
+
+    pub fn in_german_bbox(&self) -> bool {
+        (GERMANY_BBOX_MIN_LON..=GERMANY_BBOX_MAX_LON).contains(&self.longitude)
+            && (GERMANY_BBOX_MIN_LAT..=GERMANY_BBOX_MAX_LAT).contains(&self.latitude)
+    }
+
+    /// Whether a forecast for this place should come from DWD rather than Open-Meteo.
+    ///
+    /// The box is deliberately generous: a point just over the border still reads DWD's
+    /// model better than a global one, and the caller falls back either way.
+    pub fn prefers_dwd_forecast(&self) -> bool {
+        matches!(self.country_code.as_deref(), Some("DE")) || self.in_german_bbox()
     }
 
     /// Stable cache/serialisation key: coordinates rounded to two decimals.

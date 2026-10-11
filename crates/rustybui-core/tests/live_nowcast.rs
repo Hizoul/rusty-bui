@@ -12,8 +12,8 @@
 use chrono::Utc;
 use rustybui_core::{
     cycle_start, DiskCache,
-    DwdRadarClient, KnmiNowcastClient, Location, NowcastProvider, NowcastService, NowcastView,
-    OpenMeteoClient, ResponseCache,
+    DwdRadarClient, ForecastProvider, KnmiNowcastClient, Location, NowcastProvider, NowcastService,
+    NowcastView, OpenMeteoClient, ResponseCache,
 };
 
 /// A persistent cache directory shared by all live runs, so a repeat run inside
@@ -342,4 +342,68 @@ async fn offline_mode_answers_from_disk_without_network() {
         nowcast.provider.display_name(),
         knmi.snapshot().2
     );
+}
+
+#[tokio::test]
+#[ignore = "live provider chain"]
+async fn a_german_location_reads_dwd_and_a_dutch_one_does_not() {
+    let service = live_service();
+
+    let (forecast, provider) = service
+        .forecast(&berlin(), "Europe/Berlin")
+        .await
+        .expect("Berlin forecast");
+    assert_eq!(provider, ForecastProvider::Dwd, "Berlin belongs to DWD's own model");
+    assert!(forecast.current.is_some(), "DWD gave no current conditions");
+    assert!(
+        forecast.hourly.len() >= 24,
+        "expected at least a day of hours, got {}",
+        forecast.hourly.len()
+    );
+    assert!(
+        forecast.daily.len() >= 2,
+        "expected day rows to be aggregated, got {}",
+        forecast.daily.len()
+    );
+
+    let current = forecast.current.as_ref().unwrap();
+    let temperature = current.temperature_c.expect("temperature");
+    assert!((-60.0..=60.0).contains(&temperature), "implausible temperature {temperature}");
+    assert!(current.weather_code.is_some(), "the DWD icon did not become a weather code");
+    assert_eq!(current.apparent_temperature_c, None, "DWD publishes no apparent temperature");
+    assert_eq!(current.uv_index, None, "DWD publishes no UV index");
+
+    let first_day = &forecast.daily[0];
+    assert!(first_day.weather_code.is_some(), "the day row lost its condition");
+    assert!(
+        first_day.temperature_max_c.unwrap() >= first_day.temperature_min_c.unwrap(),
+        "day high below its low"
+    );
+    assert_eq!(first_day.sunrise, None, "Bright Sky carries no sun times");
+    println!(
+        "Berlin: {} · {} hourly · {} daily · {} {:.1}°/{:.1}°",
+        provider.display_name(),
+        forecast.hourly.len(),
+        forecast.daily.len(),
+        first_day.date,
+        first_day.temperature_max_c.unwrap(),
+        first_day.temperature_min_c.unwrap()
+    );
+
+    // Same call, a Dutch location: Open-Meteo answers, because DWD's model is not the one
+    // that reports on the Netherlands.
+    let (_, dutch) = service
+        .forecast(&leiden(), "Europe/Amsterdam")
+        .await
+        .expect("Leiden forecast");
+    assert_eq!(dutch, ForecastProvider::OpenMeteo, "Leiden belongs to Open-Meteo");
+
+    // Aachen is a German location just over the border, and Open-Meteo could serve it too;
+    // DWD is still the one that reports on it.
+    let (_, aachen_provider) = service
+        .forecast(&aachen(), "Europe/Berlin")
+        .await
+        .expect("Aachen forecast");
+    assert_eq!(aachen_provider, ForecastProvider::Dwd);
+    println!("Aachen: {}", aachen_provider.display_name());
 }

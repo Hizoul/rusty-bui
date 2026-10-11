@@ -225,9 +225,10 @@ Open-Meteo returned nothing"
 
         Command::Forecast(args) => {
             let location = resolve_location(args.lat, args.lon, args.name, &config)?;
-            let client = OpenMeteoClient::new(ResponseCache::new())?;
+            let service = service(cli.knmi_key, cli.offline)?;
             let timezone = location.timezone.clone().unwrap_or_else(|| "auto".to_string());
-            let forecast = client.fetch_forecast(&location, &timezone).await?;
+            // DWD's own model inside Germany, Open-Meteo everywhere else.
+            let (forecast, provider) = service.forecast(&location, &timezone).await?;
 
             if args.json && !args.raw {
                 // The labelled view, which is what the front-ends render.
@@ -237,6 +238,11 @@ Open-Meteo returned nothing"
                 println!("{}", serde_json::to_string_pretty(&forecast)?);
             } else {
                 print_forecast(&location, &forecast, args.hours, args.days, imperial);
+                println!(
+                    "  source       : {} — {}",
+                    provider.display_name(),
+                    provider.attribution()
+                );
             }
         }
 
@@ -251,13 +257,13 @@ Open-Meteo returned nothing"
             // per-provider gate still paces whatever actually leaves the machine.
             let (nowcast, forecast, air) = tokio::join!(
                 service.nowcast(&location, cli.refresh),
-                client.fetch_forecast(&location, &timezone),
+                service.forecast(&location, &timezone),
                 client.fetch_air_quality(&location),
             );
 
             let mut errors = Vec::new();
             let forecast = match forecast {
-                Ok(forecast) => Some(forecast),
+                Ok((forecast, provider)) => Some((forecast, provider)),
                 Err(error) => {
                     errors.push(format!("forecast: {error}"));
                     None
@@ -279,7 +285,8 @@ Open-Meteo returned nothing"
                 now,
                 AppParts {
                     nowcast: nowcast.as_ref(),
-                    forecast: forecast.as_ref(),
+                    forecast: forecast.as_ref().map(|(forecast, _)| forecast),
+                    forecast_provider: forecast.as_ref().map(|(_, provider)| *provider),
                     air: air.as_ref(),
                     errors,
                 },

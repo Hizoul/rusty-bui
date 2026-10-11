@@ -444,11 +444,9 @@ struct RawBrightSkyRecord {
     pressure_msl: Option<f64>,
     wind_speed: Option<f64>,
     wind_direction: Option<f64>,
-    cloud_cover: Option<f64>,
     dew_point: Option<f64>,
     relative_humidity: Option<f64>,
     visibility: Option<f64>,
-    wind_gust_speed: Option<f64>,
     precipitation_probability: Option<f64>,
     icon: Option<String>,
 }

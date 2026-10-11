@@ -1,17 +1,20 @@
 //! Provider clients — only the three this port supports: KNMI, DWD (via Bright
 //! Sky) and Open-Meteo.
 
+pub mod dwd_forecast;
 pub mod dwd_radar;
 pub mod http;
 pub mod knmi;
 pub mod openmeteo;
 
+pub use dwd_forecast::DwdForecastClient;
 pub use dwd_radar::DwdRadarClient;
 pub use http::{FetchStats, HttpClient, Source};
 pub use knmi::KnmiNowcastClient;
 pub use openmeteo::OpenMeteoClient;
 
 use crate::cache::{cycle_start, DiskCache, ResponseCache};
+use crate::forecast::Forecast;
 use crate::location::Location;
 use crate::nowcast::{NowcastProvider, RainNowcast};
 use chrono::{DateTime, Utc};
@@ -54,11 +57,38 @@ macro_rules! provider_log {
 }
 pub(crate) use provider_log;
 
+/// Which provider answered a forecast, so a screen can say where its numbers came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForecastProvider {
+    Dwd,
+    OpenMeteo,
+}
+
+impl ForecastProvider {
+    pub fn display_name(self) -> &'static str {
+        match self {
+            ForecastProvider::Dwd => "DWD",
+            ForecastProvider::OpenMeteo => "Open-Meteo",
+        }
+    }
+
+    /// CC BY 4.0 attribution line.
+    pub fn attribution(self) -> &'static str {
+        match self {
+            ForecastProvider::Dwd => "Forecast © DWD (Bright Sky)",
+            ForecastProvider::OpenMeteo => "Forecast © Open-Meteo",
+        }
+    }
+}
+
 /// Picks the best available rain nowcast for a location and caches it per radar
 /// cycle, the same source order WeatherMaster uses:
 ///
 /// * inside KNMI coverage (NL): KNMI radar → DWD radar → Open-Meteo model,
 /// * everywhere else: DWD radar → KNMI radar → Open-Meteo model.
+///
+/// The same service answers forecasts — DWD's own model inside Germany, Open-Meteo
+/// everywhere else — because both read the same caches and share one gate per source.
 pub struct NowcastService {
     knmi_api_key: Option<String>,
     cache: DiskCache,
@@ -69,14 +99,18 @@ pub struct NowcastService {
 struct ClientSet {
     knmi: KnmiNowcastClient,
     dwd: DwdRadarClient,
+    dwd_forecast: DwdForecastClient,
     openmeteo: OpenMeteoClient,
 }
 
 impl ClientSet {
     fn new(knmi_api_key: &Option<String>, responses: &ResponseCache) -> ProviderResult<Self> {
+        // One DWD client for both DWD consumers: one gate, one set of counters.
+        let dwd_http = HttpClient::new("DWD", responses.clone())?;
         Ok(Self {
             knmi: KnmiNowcastClient::new(knmi_api_key.clone(), responses.clone())?,
-            dwd: DwdRadarClient::new(responses.clone())?,
+            dwd: DwdRadarClient::with_http(dwd_http.clone()),
+            dwd_forecast: DwdForecastClient::new(dwd_http),
             openmeteo: OpenMeteoClient::new(responses.clone())?,
         })
     }
@@ -121,6 +155,7 @@ impl NowcastService {
     }
 
     /// `(KNMI, DWD, Open-Meteo)` response counters — `(network, cache, stale)`.
+    /// DWD's counter covers its radar and its forecast together.
     pub fn stats(&self) -> (FetchStats, FetchStats, FetchStats) {
         (
             self.clients.knmi.stats(),
@@ -187,5 +222,63 @@ impl NowcastService {
         }
 
         None
+    }
+
+    /// Forecast for `location`, preferring the provider that reports on that place: DWD's
+    /// own model inside Germany, Open-Meteo everywhere else. Whichever fails falls back to
+    /// the other, and the answer says which one it was.
+    pub async fn forecast(
+        &self,
+        location: &Location,
+        timezone: &str,
+    ) -> ProviderResult<(Forecast, ForecastProvider)> {
+        let order = if location.prefers_dwd_forecast() {
+            [ForecastProvider::Dwd, ForecastProvider::OpenMeteo]
+        } else {
+            [ForecastProvider::OpenMeteo, ForecastProvider::Dwd]
+        };
+
+        let mut failure = None;
+        for provider in order {
+            let attempt = match provider {
+                ForecastProvider::Dwd => {
+                    self.clients.dwd_forecast.fetch_forecast(location, timezone).await
+                }
+                ForecastProvider::OpenMeteo => {
+                    self.clients.openmeteo.fetch_forecast(location, timezone).await
+                }
+            };
+
+            match attempt {
+                Ok(forecast) if forecast.current.is_some() || !forecast.hourly.is_empty() => {
+                    provider_log!(
+                        "forecast for {} from {} ({} hourly samples)",
+                        location.key(),
+                        provider.display_name(),
+                        forecast.hourly.len()
+                    );
+                    return Ok((forecast, provider));
+                }
+                Ok(_) => {
+                    failure = Some(ProviderError::Unavailable {
+                        provider: provider.display_name(),
+                        reason: "the response carried no forecast records".to_string(),
+                    })
+                }
+                Err(error) => {
+                    provider_log!(
+                        "{} forecast failed for {}: {error}",
+                        provider.display_name(),
+                        location.key()
+                    );
+                    failure = Some(error)
+                }
+            }
+        }
+
+        Err(failure.unwrap_or(ProviderError::Unavailable {
+            provider: "forecast",
+            reason: "no provider answered".to_string(),
+        }))
     }
 }
