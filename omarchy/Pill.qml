@@ -7,8 +7,11 @@ import qs.Ui
 // Shape mirrors the built-in omarchy.weather widget: the shell routes
 // open/close/toggle through these functions on the bar-widget root
 // (`Bar.findPanelWidget` needs open/close/opened), and the detail popout lives in
-// Panel.qml, loaded here so it can be injected with the bar, its settings and the
-// pill as the popout anchor.
+// RainPanel.qml, loaded here so it can be injected with the bar, its settings and
+// the pill as the popout anchor.
+//
+// Named Pill.qml rather than BarWidget.qml on purpose: a component file named
+// after the type it extends makes the type name ambiguous with the imported one.
 BarWidget {
   id: root
   moduleName: "mmb.rainnowcast"
@@ -66,7 +69,7 @@ BarWidget {
   Loader {
     id: panelLoader
     active: true
-    source: Qt.resolvedUrl("Panel.qml")
+    source: Qt.resolvedUrl("RainPanel.qml")
     visible: false
     onLoaded: {
       root.injectPanel()

@@ -8,6 +8,13 @@ pub mod nowcast;
 pub mod providers;
 pub mod view;
 
+pub mod appview;
+
+pub use appview::{
+    condition_label, wind_compass, AirQualityView, AppParts, AppView, CurrentView, DailyView,
+    ForecastView, HourlyView,
+};
+
 pub use cache::{
     cycle_start, request_key, snap_to_cycle, DiskCache, ResponseCache, NOWCAST_CYCLE_SECONDS,
     RESPONSE_FRESH_SECONDS, RESPONSE_MAX_STALE_SECONDS,

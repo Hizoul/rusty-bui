@@ -1,5 +1,4 @@
 import QtQuick
-import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Commons as Commons
@@ -12,6 +11,9 @@ import "Model.js" as Model
 // The data is `rustybui bar --json` — the same view contract the standalone app
 // consumes. The binary owns fetching, caching and rate limiting, so this panel
 // only decides when to ask (on open and once per radar cycle).
+//
+// Named RainPanel.qml rather than Panel.qml on purpose: a component file named
+// after the type it extends makes the type name ambiguous with the imported one.
 Panel {
   id: root
   moduleName: "mmb.rainnowcast"
@@ -35,7 +37,7 @@ Panel {
 
   readonly property string tooltip: {
     if (!view) return errorText !== "" ? errorText : "rain nowcast"
-    var lines = []
+    const lines = []
     lines.push(Model.locationLine(view) + ": " + Model.summaryLine(view, clock24))
     lines.push(Model.providerLine(view) + " · " + Model.statusLine(view, clock24))
     return lines.join("\n")
@@ -44,7 +46,7 @@ Panel {
   readonly property string detailText: {
     if (!view) return ""
     if (hoveredIndex >= 0 && hoveredIndex < view.points.length) {
-      var point = view.points[hoveredIndex]
+      const point = view.points[hoveredIndex]
       return Model.formatClock(point.timeMs, clock24) + " · " + Model.shortIntensity(point.mmPerHour) + " mm/h · " + String(point.class).replace("-", " ")
     }
     return Model.summaryLine(view, clock24)

@@ -7,20 +7,22 @@ single long-running Quickshell process that loads plugins from
 
 ```
 manifest.json     plugin contract: one bar-widget, right-hand section by default
-BarWidget.qml     the pill; the shell routes open/close/toggle through it
-Panel.qml         the popout: chart, summary, provenance
-NowcastChart.qml  the chart itself (hour ticks, "now" marker, mm/h axis)
-Model.js          payload parsing and label formatting, no QML types
-test/             node checks of Model.js against a captured payload
-install.sh        build + install on an Omarchy machine
+Pill.qml          the pill; the shell routes open/close/toggle through it
+RainPanel.qml     the popout: chart, summary, provenance
 ```
+
+`Model.js` and `NowcastChart.qml` come from the repo's `qml/` directory and are copied in
+when the plugin is staged — the window plugin under `app/` uses the same two files.
+
+The entry points are not called `BarWidget.qml`/`Panel.qml` on purpose: a component file
+named after the type it extends makes the type name ambiguous with the imported one.
 
 ## Install
 
 On the Omarchy machine, from a checkout of this repo:
 
 ```bash
-omarchy/install.sh --bind     # build, install, place the widget, add SUPER + SHIFT + R
+./install.sh --bind     # build, install both plugins, place the pill, add the keybinding
 ```
 
 Without `--bind` the keybinding is only printed, so you can decide where it goes in
@@ -76,12 +78,12 @@ or **Model © Open-Meteo**, all CC BY 4.0. The location is whatever
 ## Checking it
 
 ```bash
-node omarchy/test/model.test.mjs                    # payload/label logic, no shell needed
-container/check-qml.sh /path/to/omarchy-checkout    # manifest + QML against the real shell
+node test/model.test.mjs                          # payload/label logic, no shell needed
+container/check-qml.sh /path/to/omarchy-checkout  # manifests + QML against the real shell
 ```
 
-`check-qml.sh` validates the manifest with Omarchy's own `omarchy-plugin-validate` and
-type-checks the QML against an Omarchy source tree. Unresolved `Quickshell` imports are
-expected there (Quickshell is not installed in the build container); the `qs.Commons`
-and `qs.Ui` members resolve, which is what catches typos in theme tokens and base-type
-properties.
+`check-qml.sh` stages both plugins exactly as `install.sh` does, validates each manifest
+with Omarchy's own `omarchy-plugin-validate`, and type-checks the QML against an Omarchy
+source tree. Unresolved `Quickshell` imports are expected there (Quickshell is not
+installed in the build container) and are stubbed, so the `qs.Commons` and `qs.Ui` members
+resolve — which is what catches typos in theme tokens and base-type properties.

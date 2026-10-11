@@ -20,13 +20,20 @@ air quality, geocoding, minutely-15 nowcast fallback, worldwide).
 ## Layout
 
 ```
-crates/rustybui-core   domain types, providers, caches (no UI, no CLI)
-crates/rustybui-cli    `rustybui` binary: nowcast / forecast / air / search / bar / cache
-omarchy/               bar-widget plugin: pill, popout, chart, install script
-app/                   standalone Quickshell window app                 [planned]
-qml/                   QML components shared by the plugin and the app  [planned]
+crates/rustybui-core   domain types, providers, caches, the view contracts QML renders
+crates/rustybui-cli    `rustybui` binary: nowcast / forecast / app / air / search / bar / cache
+qml/                   QML shared by both plugins: Model.js, NowcastChart.qml, Card.qml
+omarchy/               bar plugin: Pill.qml (the pill) + RainPanel.qml (the popout)
+app/                   window plugin: App.qml
+test/                  node checks of Model.js against captured payloads
+scripts/               staging, used by install.sh and by the QML check
 container/             Containerfile + helper scripts for podman
+install.sh             build, install both plugins, launcher entry, keybindings
 ```
+
+The two plugin directories link to the shared files in `qml/` so an editor and `qmllint`
+resolve them in place; staging dereferences the links, because Omarchy rejects symlinks
+inside a plugin folder.
 
 ## Building and testing (podman)
 
@@ -46,26 +53,31 @@ requests at all.
 The QML is checked without a running shell:
 
 ```bash
-node omarchy/test/model.test.mjs                   # payload and label logic
-container/check-qml.sh /path/to/omarchy-checkout   # manifest + QML against the real shell
+node test/model.test.mjs                          # payload and label logic
+container/check-qml.sh /path/to/omarchy-checkout  # manifests + QML against the real shell
 ```
 
-## The Omarchy bar widget
+## The Omarchy plugins
 
-`omarchy/` is an Omarchy 4 plugin: a pill with the rain nowcast for the stored location
-and a popout with the two-hour chart. It owns no fetching — it runs `rustybui bar
---json` and renders the result, so all caching and rate limiting stays in one place.
+Two plugins, both thin: they own no fetching, they run `rustybui` and render the result,
+so all caching and rate limiting stays in one place.
+
+- `omarchy/` — the bar pill and its popout: the two-hour nowcast for the stored location,
+  in the bar and in a popout on `SUPER + SHIFT + R`.
+- `app/` — the weather window: current conditions, the same nowcast chart, hourly and
+  daily outlook, air quality, opened from the launcher (installed as a `.desktop` entry)
+  or with `omarchy-shell shell toggle mmb.weather '{}'`.
 
 On the Omarchy machine, from a checkout:
 
 ```bash
-omarchy/install.sh --bind      # or without --bind to just print the keybinding
+./install.sh --bind      # or without --bind to just print the keybindings
 ```
 
-That installs the binary to `~/.local/bin`, drops the plugin into
-`~/.config/omarchy/plugins/mmb.rainnowcast/`, enables it on the bar's right side and adds
-`SUPER + SHIFT + R` to `~/.config/hypr/bindings.lua`. See `omarchy/README.md` for the
-settings (`binaryPath`, `pollMinutes`, `clock24`) and the attribution rules.
+That installs the binary to `~/.local/bin`, stages and validates both plugins into
+`~/.config/omarchy/plugins/`, writes the launcher entry and adds the keybindings to
+`~/.config/hypr/bindings.lua`. See `omarchy/README.md` and `app/README.md` for settings
+and attribution.
 
 ## Usage
 
@@ -74,6 +86,8 @@ rustybui set-location "Leiden" --lat 52.16 --lon 4.49 --country NL --timezone Eu
 rustybui nowcast                 # human-readable table (+ where each answer came from)
 rustybui nowcast --json          # the camelCase view contract the QML consumes
 rustybui bar                     # Waybar-style JSON for the Omarchy bar: text/class/tooltip
+rustybui app                    # one payload for a whole screen: nowcast + forecast + air
+rustybui app --text             # …or a short human summary of the same payload
 rustybui forecast --hours 12 --days 3
 rustybui air
 rustybui search Amersfoort

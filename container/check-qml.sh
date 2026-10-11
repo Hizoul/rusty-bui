@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Check the Omarchy plugin folder: manifest against Omarchy's own validator, QML
-# against the real shell sources.
+# Check both plugins the way Omarchy will load them: stage them exactly as
+# install.sh does, validate each manifest with Omarchy's own checker, then
+# type-check the QML against the real shell sources.
 #
 #   container/check-qml.sh /path/to/omarchy-checkout
 #
-# The checkout only needs its shell/ directory (imports `qs.Commons`, `qs.Ui`) and
-# bin/ (the manifest validator). Quickshell itself is not installed here, so
-# `Quickshell`/`Quickshell.Io` imports stay unresolved — that is expected and does
-# not stop the checks that matter: our use of the qs.* singletons and base types.
+# The checkout only needs its shell/ directory (for `qs.Commons`, `qs.Ui`) and bin/
+# (the manifest validator). The checking itself lives in container/lint-plugins.sh,
+# which runs inside the container — written as an ordinary script rather than a
+# quoted string, which is what a here-doc-heavy inline version kept getting wrong.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -25,39 +26,8 @@ exec podman run --rm -i \
   -v rustybui-cache:/cache \
   -w /work \
   rustybui-dev:latest sh -c '
-    set -u
-    status=0
-
-    # Arch ships qmllint outside PATH, in the Qt6 libexec directory.
-    qmllint_bin="$(command -v qmllint || true)"
-    [[ -n $qmllint_bin ]] || qmllint_bin=/usr/lib/qt6/bin/qmllint
-    [[ -x $qmllint_bin ]] || { echo "qmllint not found" >&2; exit 2; }
-
-    echo "== manifest (omarchy-plugin-validate)"
-    if [[ -f /omarchy-src/bin/omarchy-plugin-validate ]]; then
-      if bash /omarchy-src/bin/omarchy-plugin-validate /work/omarchy; then
-        echo "   valid"
-      else
-        status=1
-      fi
-    else
-      echo "   (no validator in the checkout, skipping)"
-    fi
-
-    # qmllint resolves `import qs.Commons` from a directory named qs/.
-    mkdir -p /tmp/qsroot
-    ln -sfn /omarchy-src/shell /tmp/qsroot/qs
-
-    for file in /work/omarchy/*.qml; do
-      echo "== ${file#/work/} (against the Omarchy sources)"
-      "$qmllint_bin" -I /tmp/qsroot "$file" || status=1
-    done
-
-    echo "== syntax only (--bare, ignores unresolved imports)"
-    for file in /work/omarchy/*.qml; do
-      echo "-- ${file#/work/}"
-      "$qmllint_bin" --bare "$file" || status=1
-    done
-
-    exit $status
+    set -eu
+    echo "== staging both plugins (symlinks dereferenced, exactly as install.sh does)"
+    sh /work/scripts/stage-plugins.sh /tmp/staged >/dev/null
+    exec sh /work/container/lint-plugins.sh /omarchy-src /tmp/staged/mmb.rainnowcast /tmp/staged/mmb.weather
   '

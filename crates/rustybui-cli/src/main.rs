@@ -9,8 +9,8 @@ use chrono::{Local, Utc};
 use clap::{Args, Parser, Subcommand};
 use config::Config;
 use rustybui_core::{
-    format_intensity, DiskCache, Forecast, Location, NowcastService, NowcastView, OpenMeteoClient,
-    ResponseCache,
+    format_intensity, AppParts, AppView, DiskCache, Forecast, ForecastView, Location,
+    NowcastService, NowcastView, OpenMeteoClient, ResponseCache,
 };
 
 #[derive(Parser)]
@@ -45,6 +45,8 @@ enum Command {
     Bar(BarArgs),
     /// Weather forecast (DWD/Bright Sky or Open-Meteo).
     Forecast(ForecastArgs),
+    /// Everything one screen needs, in one payload (the app's input).
+    App(AppArgs),
     /// Air quality (European AQI).
     Air(LocationArgs),
     /// Find a place by name (Open-Meteo geocoding).
@@ -106,12 +108,31 @@ struct ForecastArgs {
     name: Option<String>,
     #[arg(long)]
     json: bool,
+    /// Dump the raw normalised model instead of the labelled view.
+    #[arg(long)]
+    raw: bool,
     /// Hourly rows to print.
     #[arg(long, default_value_t = 12)]
     hours: usize,
     /// Daily rows to print.
     #[arg(long, default_value_t = 3)]
     days: usize,
+}
+
+#[derive(Args)]
+struct AppArgs {
+    #[arg(long)]
+    lat: Option<f64>,
+    #[arg(long)]
+    lon: Option<f64>,
+    #[arg(long)]
+    name: Option<String>,
+    /// Hourly rows to include in the payload.
+    #[arg(long, default_value_t = 24)]
+    hours: usize,
+    /// Print a short human summary instead of the payload.
+    #[arg(long)]
+    text: bool,
 }
 
 #[derive(Args)]
@@ -208,10 +229,68 @@ Open-Meteo returned nothing"
             let timezone = location.timezone.clone().unwrap_or_else(|| "auto".to_string());
             let forecast = client.fetch_forecast(&location, &timezone).await?;
 
-            if args.json {
+            if args.json && !args.raw {
+                // The labelled view, which is what the front-ends render.
+                let view = ForecastView::new(&forecast, Utc::now(), args.hours, imperial);
+                println!("{}", serde_json::to_string_pretty(&view)?);
+            } else if args.json {
                 println!("{}", serde_json::to_string_pretty(&forecast)?);
             } else {
                 print_forecast(&location, &forecast, args.hours, args.days, imperial);
+            }
+        }
+
+        Command::App(args) => {
+            let location = resolve_location(args.lat, args.lon, args.name, &config)?;
+            let service = service(cli.knmi_key, cli.offline)?;
+            let now = Utc::now();
+            let client = OpenMeteoClient::new(service.response_cache().clone())?;
+            let timezone = location.timezone.clone().unwrap_or_else(|| "auto".to_string());
+
+            // All three in flight at once: separate providers, one payload, and the
+            // per-provider gate still paces whatever actually leaves the machine.
+            let (nowcast, forecast, air) = tokio::join!(
+                service.nowcast(&location, cli.refresh),
+                client.fetch_forecast(&location, &timezone),
+                client.fetch_air_quality(&location),
+            );
+
+            let mut errors = Vec::new();
+            let forecast = match forecast {
+                Ok(forecast) => Some(forecast),
+                Err(error) => {
+                    errors.push(format!("forecast: {error}"));
+                    None
+                }
+            };
+            let air = match air {
+                Ok(air) => Some(air),
+                Err(error) => {
+                    errors.push(format!("air: {error}"));
+                    None
+                }
+            };
+            if nowcast.is_none() {
+                errors.push("nowcast: no radar or model coverage for this location".to_string());
+            }
+
+            let view = AppView::build(
+                &location,
+                now,
+                AppParts {
+                    nowcast: nowcast.as_ref(),
+                    forecast: forecast.as_ref(),
+                    air: air.as_ref(),
+                    errors,
+                },
+                args.hours,
+                imperial,
+            );
+
+            if args.text {
+                print_app(&view);
+            } else {
+                println!("{}", serde_json::to_string(&view)?);
             }
         }
 
@@ -413,6 +492,74 @@ fn print_nowcast(view: &NowcastView, imperial: bool) {
     }
     println!();
     println!("  {}", view.provider.attribution);
+}
+
+/// Short human summary of the app payload — the JSON is the real output; this is
+/// for reading in a terminal and for smoke-testing the pipeline by eye.
+fn print_app(view: &AppView) {
+    println!("{}", view.headline());
+
+    if let Some(nowcast) = &view.nowcast {
+        println!(
+            "  nowcast: {} · {} · {} · {} samples of {} min",
+            nowcast.summary.pill,
+            nowcast.summary.current_label,
+            nowcast.provider.attribution,
+            nowcast.points.len(),
+            nowcast.slot_minutes
+        );
+    }
+
+    if let Some(forecast) = &view.forecast {
+        if let Some(current) = &forecast.current {
+            println!(
+                "  current: {} {} · {} · {}{}",
+                current.temperature_label.clone().unwrap_or_else(|| "-".into()),
+                current.condition_label,
+                current.wind_label.clone().unwrap_or_else(|| "-".into()),
+                current.humidity_label.clone().unwrap_or_else(|| "-".into()),
+                current
+                    .pressure_label
+                    .as_ref()
+                    .map(|label| format!(" · {label}"))
+                    .unwrap_or_default()
+            );
+        }
+        if let Some(today) = forecast.today() {
+            println!(
+                "  today:   {} {} / {} · UV {} · sunrise {} sunset {}",
+                today.day_label,
+                today.high_label.clone().unwrap_or_else(|| "-".into()),
+                today.low_label.clone().unwrap_or_else(|| "-".into()),
+                today.uv_label.clone().unwrap_or_else(|| "-".into()),
+                today.sunrise_label.clone().unwrap_or_else(|| "-".into()),
+                today.sunset_label.clone().unwrap_or_else(|| "-".into())
+            );
+        }
+        println!(
+            "  hourly:  {} rows from {} ({}), daily {} rows",
+            forecast.hourly.len(),
+            forecast.hourly.first().map(|row| row.clock_label.clone()).unwrap_or_else(|| "-".into()),
+            forecast.timezone,
+            forecast.daily.len()
+        );
+    }
+
+    if let Some(air) = &view.air {
+        println!(
+            "  air:     {} {}{}",
+            air.band_label,
+            air.european_aqi.map_or("-".to_string(), |aqi| format!("{aqi:.0}")),
+            air.pm25_label
+                .as_ref()
+                .map(|label| format!(" · PM2.5 {label}"))
+                .unwrap_or_default()
+        );
+    }
+
+    for error in &view.errors {
+        println!("  ! {error}");
+    }
 }
 
 fn print_forecast(

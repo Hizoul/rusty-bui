@@ -7,7 +7,7 @@
   "description": "Two-hour rain nowcast from KNMI/DWD radar (Open-Meteo model outside radar coverage), with a detail popout on the bar",
   "kinds": ["bar-widget"],
   "entryPoints": {
-    "barWidget": "BarWidget.qml"
+    "barWidget": "Pill.qml"
   },
   "barWidget": {
     "displayName": "Rain nowcast",

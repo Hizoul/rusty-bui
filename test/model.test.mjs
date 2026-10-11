@@ -1,10 +1,10 @@
-// Checks Model.js against a real `rustybui bar --json` payload, without needing a
-// running Quickshell. Run it with:
+// Checks Model.js against real payloads from `rustybui bar --json` and
+// `rustybui app`, without needing a running Quickshell. Run it with:
 //
-//   node omarchy/test/model.test.mjs [payload.json]
+//   node test/model.test.mjs [bar-payload.json] [app-payload.json]
 //
-// With no argument it reads ../test/fixtures/bar-dry.json in this repo, which was
-// captured from the live KNMI nowcast.
+// With no arguments it reads the fixtures in test/fixtures/, which were captured
+// from the live KNMI nowcast and the live app payload.
 
 import { readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
@@ -12,8 +12,9 @@ import { fileURLToPath } from "node:url"
 import vm from "node:vm"
 
 const here = dirname(fileURLToPath(import.meta.url))
-const modelPath = resolve(here, "../Model.js")
-const fixturePath = process.argv[2] ?? resolve(here, "fixtures/bar-dry.json")
+const modelPath = resolve(here, "../qml/Model.js")
+const barPath = process.argv[2] ?? resolve(here, "fixtures/bar-dry.json")
+const appPath = process.argv[3] ?? resolve(here, "fixtures/app-leiden.json")
 
 // Model.js is plain QML-compatible JS; barColor needs Qt.rgba, which the text
 // helpers never touch, so a stub is enough to load the file.
@@ -21,7 +22,8 @@ const context = vm.createContext({ Qt: { rgba: (r, g, b, a) => ({ r, g, b, a }) 
 vm.runInContext(readFileSync(modelPath, "utf8"), context, { filename: modelPath })
 
 const Model = context
-const payload = readFileSync(fixturePath, "utf8")
+const payload = readFileSync(barPath, "utf8")
+const appPayload = readFileSync(appPath, "utf8")
 
 let failures = 0
 function check(name, actual, expected) {
@@ -89,6 +91,29 @@ check("null means the location is not covered", Model.parseView("null"), { ok: f
 check("blank output is a failure, not a crash", Model.parseView("").ok, false)
 check("garbage is reported, not thrown", Model.parseView("{oops").ok, false)
 check("an empty point list is a failure", Model.parseView('{"points":[]}').ok, false)
+
+// ---- the app payload (`rustybui app`)
+const app = Model.parseApp(appPayload)
+check("parses the captured app payload", app.ok, true)
+check("the payload names the location", typeof app.view.location.name, "string")
+check("it carries a nowcast and a forecast", [!!app.view.nowcast, !!app.view.forecast, !!app.view.air], [true, true, true])
+check(
+  "the current block is pre-labelled, so QML never formats numbers",
+  [app.view.forecast.current.temperatureLabel, app.view.forecast.current.humidityLabel].every((label) => typeof label === "string"),
+  true
+)
+check(
+  "empty payloads are reported rather than thrown",
+  [Model.parseApp("").ok, Model.parseApp("[]").ok, Model.parseApp("{}").ok],
+  [false, false, false]
+)
+
+// ---- glyphs and AQI bands
+check("clear night and clear day differ", [Model.conditionGlyph(0, false), Model.conditionGlyph(0, true)], ["\ue30d", "\ue32b"])
+check("rain, showers and thunder have their own glyphs", [Model.conditionGlyph(63, true), Model.conditionGlyph(81, true), Model.conditionGlyph(95, true)], ["\ue318", "\ue318", "\ue31d"])
+check("snow and fog too", [Model.conditionGlyph(73, true), Model.conditionGlyph(45, true)], ["\ue31a", "\ue313"])
+check("an unknown code still draws something", Model.conditionGlyph(4242, true).length > 0, true)
+check("AQI bands are ordered worst-last", [Model.aqiRank("good"), Model.aqiRank("very poor"), Model.aqiRank("nonsense")], [0, 4, -1])
 
 // ---- chart scaling and ticks
 check("the axis never collapses below half a millimetre", Model.axisTop(0), 0.5)
