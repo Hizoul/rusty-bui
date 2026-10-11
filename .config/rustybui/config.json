@@ -1,10 +1,10 @@
 {
   "location": {
-    "name": "Leiden",
-    "latitude": 52.16,
-    "longitude": 4.49,
-    "country_code": "NL",
-    "timezone": "Europe/Amsterdam"
+    "name": "Berlin",
+    "latitude": 52.52,
+    "longitude": 13.405,
+    "country_code": "DE",
+    "timezone": "Europe/Berlin"
   },
   "clock": "24h",
   "hours": 24,

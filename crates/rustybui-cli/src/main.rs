@@ -5,7 +5,7 @@
 mod config;
 
 use anyhow::{bail, Context, Result};
-use chrono::{Local, Utc};
+use chrono::{FixedOffset, Local, Utc};
 use clap::{Args, Parser, Subcommand};
 use config::Config;
 use rustybui_core::{
@@ -749,6 +749,12 @@ fn print_forecast(
     imperial: bool,
 ) {
     println!("Forecast · {} · {}", location.name, forecast.timezone);
+
+    // The location's own offset, not the machine's: a forecast for Berlin reads the same
+    // wherever the CLI runs.
+    let offset = FixedOffset::east_opt(forecast.utc_offset_seconds as i32)
+        .unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+
     if let Some(current) = &forecast.current {
         println!(
             "  now: {}°C (feels {}°C) · {}% RH · {} km/h · {} hPa{}",
@@ -765,7 +771,7 @@ fn print_forecast(
 
     println!("\n  hourly");
     for sample in forecast.hourly_from(Utc::now(), hours) {
-        let local = sample.time.with_timezone(&Local);
+        let local = sample.time.with_timezone(&offset);
         println!(
             "    {}  {:>5}°C  {:>3}%  {:>5} {}  {:>4}%  wind {:>5} km/h",
             local.format("%H:%M"),
@@ -797,12 +803,15 @@ fn print_forecast(
             day.temperature_max_c.map_or("-".into(), |v| format!("{v:.1}")),
             day.temperature_min_c.map_or("-".into(), |v| format!("{v:.1}")),
             day.uv_index_max.map_or("-".into(), |v| format!("{v:.1}")),
-            day.precipitation_mm.map_or(0.0, |v| v),
+            // Through the shared formatter: a raw f64 prints 0.9999999999999999.
+            day.precipitation_mm
+                .map(|mm| if imperial { format!("{:.3}", mm / 25.4) } else { format!("{mm:.2}") })
+                .unwrap_or_else(|| "0.00".into()),
             day.sunrise
-                .map(|t| t.with_timezone(&Local).format("%H:%M").to_string())
+                .map(|t| t.with_timezone(&offset).format("%H:%M").to_string())
                 .unwrap_or_else(|| "-".into()),
             day.sunset
-                .map(|t| t.with_timezone(&Local).format("%H:%M").to_string())
+                .map(|t| t.with_timezone(&offset).format("%H:%M").to_string())
                 .unwrap_or_else(|| "-".into()),
         );
     }
