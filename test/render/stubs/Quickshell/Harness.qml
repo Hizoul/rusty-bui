@@ -25,7 +25,7 @@ QtObject {
     return out
   }
 
-  function grabAll(dir) {
+  function grabAll(dir, prefix) {
     outDir = dir
     var targets = visibleWindows()
     if (targets.length === 0) {
@@ -36,7 +36,7 @@ QtObject {
     remaining = targets.length
     for (var i = 0; i < targets.length; i++) {
       const win = targets[i]
-      const name = win.harnessName || ("window-" + i)
+      const name = (prefix ? prefix + "-" : "") + (win.harnessName || ("window-" + i))
       const path = dir + "/" + name + ".png"
       win.contentItem.grabToImage(function(result) {
         if (result && result.saveToFile(path)) console.log("harness: wrote " + path)

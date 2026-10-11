@@ -85,8 +85,12 @@ fn speed(value: f64, imperial: bool) -> String {
     }
 }
 
-fn clock(time: DateTime<FixedOffset>) -> String {
-    time.format("%H:%M").to_string()
+fn clock(time: DateTime<FixedOffset>, clock24: bool) -> String {
+    if clock24 {
+        time.format("%H:%M").to_string()
+    } else {
+        time.format("%-I:%M %p").to_string()
+    }
 }
 
 fn day(time: DateTime<FixedOffset>) -> String {
@@ -163,7 +167,13 @@ pub struct ForecastView {
 
 impl ForecastView {
     /// `hours` hourly rows from the first sample at or after `now`.
-    pub fn new(forecast: &Forecast, now: DateTime<Utc>, hours: usize, imperial: bool) -> Self {
+    pub fn new(
+        forecast: &Forecast,
+        now: DateTime<Utc>,
+        hours: usize,
+        imperial: bool,
+        clock24: bool,
+    ) -> Self {
         let offset = FixedOffset::east_opt(forecast.utc_offset_seconds as i32)
             .unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
 
@@ -172,13 +182,13 @@ impl ForecastView {
             .iter()
             .filter(|sample| sample.time + chrono::Duration::hours(1) > now)
             .take(hours)
-            .map(|sample| hourly_view(sample, offset, imperial))
+            .map(|sample| hourly_view(sample, offset, imperial, clock24))
             .collect();
 
         let daily = forecast
             .daily
             .iter()
-            .map(|day_forecast| daily_view(day_forecast, offset, imperial))
+            .map(|day_forecast| daily_view(day_forecast, offset, imperial, clock24))
             .collect();
 
         Self {
@@ -187,7 +197,7 @@ impl ForecastView {
             current: forecast
                 .current
                 .as_ref()
-                .map(|current| current_view(current, offset, imperial)),
+                .map(|current| current_view(current, offset, imperial, clock24)),
             hourly,
             daily,
         }
@@ -203,12 +213,13 @@ fn current_view(
     current: &crate::forecast::CurrentWeather,
     offset: FixedOffset,
     imperial: bool,
+    clock24: bool,
 ) -> CurrentView {
     CurrentView {
         time_ms: current.time.map(|time| time.timestamp_millis()),
         clock_label: current
             .time
-            .map(|time| clock(time.with_timezone(&offset))),
+            .map(|time| clock(time.with_timezone(&offset), clock24)),
         temperature_c: current.temperature_c,
         temperature_label: temperature(current.temperature_c),
         feels_like_label: current
@@ -247,11 +258,16 @@ fn current_view(
     }
 }
 
-fn hourly_view(sample: &HourlyForecast, offset: FixedOffset, imperial: bool) -> HourlyView {
+fn hourly_view(
+    sample: &HourlyForecast,
+    offset: FixedOffset,
+    imperial: bool,
+    clock24: bool,
+) -> HourlyView {
     let local = sample.time.with_timezone(&offset);
     HourlyView {
         time_ms: sample.time.timestamp_millis(),
-        clock_label: clock(local),
+        clock_label: clock(local, clock24),
         temperature_c: sample.temperature_c,
         temperature_label: temperature(sample.temperature_c),
         condition_label: sample.weather_code.map_or("—", condition_label).to_string(),
@@ -273,7 +289,12 @@ fn hourly_view(sample: &HourlyForecast, offset: FixedOffset, imperial: bool) -> 
     }
 }
 
-fn daily_view(day_forecast: &DailyForecast, offset: FixedOffset, imperial: bool) -> DailyView {
+fn daily_view(
+    day_forecast: &DailyForecast,
+    offset: FixedOffset,
+    imperial: bool,
+    clock24: bool,
+) -> DailyView {
     let local = day_forecast.time.with_timezone(&offset);
     DailyView {
         time_ms: day_forecast.time.timestamp_millis(),
@@ -295,10 +316,10 @@ fn daily_view(day_forecast: &DailyForecast, offset: FixedOffset, imperial: bool)
         uv_label: day_forecast.uv_index_max.map(|value| format!("{value:.1}")),
         sunrise_label: day_forecast
             .sunrise
-            .map(|time| clock(time.with_timezone(&offset))),
+            .map(|time| clock(time.with_timezone(&offset), clock24)),
         sunset_label: day_forecast
             .sunset
-            .map(|time| clock(time.with_timezone(&offset))),
+            .map(|time| clock(time.with_timezone(&offset), clock24)),
     }
 }
 
@@ -356,11 +377,11 @@ pub struct AlertView {
 }
 
 impl AlertView {
-    pub fn new(alert: &Alert, offset: FixedOffset) -> Self {
-        let clock = |value: Option<DateTime<Utc>>| {
-            value.map(|time| time.with_timezone(&offset).format("%H:%M").to_string())
+    pub fn new(alert: &Alert, offset: FixedOffset, clock24: bool) -> Self {
+        let at = |value: Option<DateTime<Utc>>| {
+            value.map(|time| clock(time.with_timezone(&offset), clock24))
         };
-        let window_label = match (clock(alert.onset), clock(alert.expires)) {
+        let window_label = match (at(alert.onset), at(alert.expires)) {
             (Some(onset), Some(expires)) => format!("{onset}–{expires}"),
             (Some(onset), None) => format!("from {onset}"),
             (None, Some(expires)) => format!("until {expires}"),
@@ -420,6 +441,7 @@ impl AppView {
         parts: AppParts<'_>,
         hours: usize,
         imperial: bool,
+        clock24: bool,
     ) -> Self {
         let offset = parts
             .forecast
@@ -435,14 +457,14 @@ impl AppView {
             alerts: parts
                 .alerts
                 .iter()
-                .map(|alert| AlertView::new(alert, offset))
+                .map(|alert| AlertView::new(alert, offset, clock24))
                 .collect(),
             nowcast: parts
                 .nowcast
                 .map(|nowcast| NowcastView::new(location, nowcast, now)),
             forecast: parts
                 .forecast
-                .map(|forecast| ForecastView::new(forecast, now, hours, imperial)),
+                .map(|forecast| ForecastView::new(forecast, now, hours, imperial, clock24)),
             forecast_attribution: parts
                 .forecast_provider
                 .map(|provider| provider.attribution().to_string()),
@@ -537,6 +559,7 @@ mod tests {
             Utc.with_ymd_and_hms(2025, 10, 11, 15, 0, 0).unwrap(),
             12,
             false,
+            true,
         );
         let current = view.current.as_ref().expect("current");
 
@@ -557,6 +580,7 @@ mod tests {
             Utc.with_ymd_and_hms(2025, 10, 11, 15, 0, 0).unwrap(),
             12,
             true,
+            true,
         );
         let current = imperial.current.as_ref().unwrap();
         assert_eq!(current.wind_label.as_deref(), Some("11.4 mph SSW"));
@@ -565,7 +589,7 @@ mod tests {
     #[test]
     fn hourly_and_daily_rows_are_clocked_in_the_locations_own_offset() {
         let now = Utc.with_ymd_and_hms(2025, 10, 11, 15, 0, 0).unwrap();
-        let view = ForecastView::new(&forecast(), now, 12, false);
+        let view = ForecastView::new(&forecast(), now, 12, false, true);
 
         // 1760191200 = 2025-10-11T14:00:00Z, which the +02:00 offset reads as 16:00,
         // and the window starts at 15:00Z — so only the later sample survives.
@@ -622,6 +646,7 @@ mod tests {
             },
             12,
             false,
+            true,
         );
 
         let json = serde_json::to_value(&view).unwrap();
@@ -642,6 +667,7 @@ mod tests {
             AppParts { errors: vec!["no coverage".to_string()], ..Default::default() },
             12,
             false,
+            true,
         );
         let json = serde_json::to_value(&empty).unwrap();
         assert!(json.get("nowcast").is_none());
@@ -656,6 +682,7 @@ mod tests {
             AppParts { nowcast: Some(&nowcast), ..Default::default() },
             12,
             false,
+            true,
         )
         .headline();
         assert!(headline.starts_with("Leiden: "), "{headline}");
@@ -668,6 +695,7 @@ mod tests {
             AppParts { forecast: Some(&forecast()), ..Default::default() },
             12,
             false,
+            true,
         )
         .headline();
         assert_eq!(headline, "Leiden: 14.2° · Light rain");

@@ -17,6 +17,29 @@ pub struct Config {
     /// 24-hour clock unless set to `12h`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clock: Option<String>,
+    /// Hourly rows the app window asks for, 1–24. Absent means 24.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hours: Option<usize>,
+    /// The app window reads the last cached answers and fetches nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offline: Option<bool>,
+}
+
+/// Preferences a screen can change, with the defaults the CLI and the window share.
+impl Config {
+    /// Hourly rows the window shows: 1–24, clamped rather than rejected, because the value
+    /// arrives from a UI that may hand over anything.
+    pub fn window_hours(&self) -> usize {
+        self.hours.unwrap_or(24).clamp(1, 24)
+    }
+
+    pub fn clock_is_24h(&self) -> bool {
+        !self.clock.as_deref().is_some_and(|clock| clock.eq_ignore_ascii_case("12h"))
+    }
+
+    pub fn is_offline(&self) -> bool {
+        self.offline.unwrap_or(false)
+    }
 }
 
 impl Config {

@@ -5,5 +5,8 @@
     "longitude": 4.49,
     "country_code": "NL",
     "timezone": "Europe/Amsterdam"
-  }
+  },
+  "clock": "24h",
+  "hours": 24,
+  "offline": false
 }

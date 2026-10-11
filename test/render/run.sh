@@ -72,7 +72,10 @@ esac
   cat "$repo/test/fixtures/$app_fixture"
   printf '\n\nvar bar = '
   cat "$repo/test/fixtures/$bar_fixture"
-  printf '\n'
+  printf '\n\n'
+  # `rustybui prefs --json` and `rustybui search … --json`, captured from live runs.
+  printf 'var prefs = {"clock24":true,"hours":24,"offline":false,"units":"metric","stored":{"clock":false,"hours":false,"offline":false,"units":false},"location":{"name":"Leiden","latitude":52.16,"longitude":4.49,"country_code":"NL","timezone":"Europe/Amsterdam"}}\n'
+  printf '\nvar search = [{"name":"Leiden, South Holland","latitude":52.15833,"longitude":4.49306,"country_code":"NL","timezone":"Europe/Amsterdam"},{"name":"Leidenborn, Rhineland-Palatinate","latitude":50.13333,"longitude":6.21667,"country_code":"DE","timezone":"Europe/Berlin"}]\n'
 } >"$work/Quickshell/Io/Fixture.js"
 
 export QT_QPA_PLATFORM=offscreen
@@ -84,10 +87,13 @@ export QT_FORCE_STDERR_LOGGING=1
 export QT_LOGGING_RULES='qt.qpa.*=false'
 
 status=0
-for driver in App Pill; do
-  echo "== $driver.qml (payload case: $case_name)"
+# name:prefix — the prefix keeps the two app-window renders apart.
+for driver in App: AppSettings:settings Pill:; do
+  name="${driver%%:*}"
+  prefix="${driver#*:}"
+  echo "== $name.qml (payload case: $case_name)"
   rm -f "$out"/*.png
-  if ! timeout 120 "$qml_bin" -I "$work" "$repo/test/render/drivers/$driver.qml" 2>&1 |
+  if ! timeout 120 "$qml_bin" -I "$work" "$repo/test/render/drivers/$name.qml" 2>&1 |
     sed "s/^/   /"; then
     status=1
   fi

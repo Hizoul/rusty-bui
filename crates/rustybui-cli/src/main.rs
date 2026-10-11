@@ -56,6 +56,8 @@ enum Command {
     Search(SearchArgs),
     /// Store the default location used when --lat/--lon are omitted.
     SetLocation(SetLocationArgs),
+    /// Read or change what the app window shows: location, clock, hours, units.
+    Prefs(PrefsArgs),
     /// Print the default location and config path.
     Which,
     /// Report or clear the caches.
@@ -114,9 +116,9 @@ struct ForecastArgs {
     /// Dump the raw normalised model instead of the labelled view.
     #[arg(long)]
     raw: bool,
-    /// Hourly rows to print.
-    #[arg(long, default_value_t = 12)]
-    hours: usize,
+    /// Hourly rows to print (default: 12).
+    #[arg(long)]
+    hours: Option<usize>,
     /// Daily rows to print.
     #[arg(long, default_value_t = 3)]
     days: usize,
@@ -130,12 +132,53 @@ struct AppArgs {
     lon: Option<f64>,
     #[arg(long)]
     name: Option<String>,
-    /// Hourly rows to include in the payload.
-    #[arg(long, default_value_t = 24)]
-    hours: usize,
+    /// Hourly rows to include in the payload (default: the stored preference, else 24).
+    #[arg(long)]
+    hours: Option<usize>,
     /// Print a short human summary instead of the payload.
     #[arg(long)]
     text: bool,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PrefsView {
+    clock24: bool,
+    hours: usize,
+    offline: bool,
+    units: String,
+    /// Which of these the user has actually chosen, so a front-end can use its own default
+    /// for the rest instead of overriding it with ours.
+    stored: StoredPrefs,
+    /// The stored location, so a settings screen can show which place it is editing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    location: Option<Location>,
+}
+
+#[derive(serde::Serialize)]
+struct StoredPrefs {
+    clock: bool,
+    hours: bool,
+    offline: bool,
+    units: bool,
+}
+
+impl PrefsView {
+    fn new(config: &Config) -> Self {
+        Self {
+            clock24: config.clock_is_24h(),
+            hours: config.window_hours(),
+            offline: config.is_offline(),
+            units: if config.imperial_units() { "imperial" } else { "metric" }.to_string(),
+            stored: StoredPrefs {
+                clock: config.clock.is_some(),
+                hours: config.hours.is_some(),
+                offline: config.offline.is_some(),
+                units: config.units.is_some(),
+            },
+            location: config.location.clone(),
+        }
+    }
 }
 
 #[derive(Args)]
@@ -147,6 +190,25 @@ struct SearchArgs {
     count: usize,
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Args)]
+struct PrefsArgs {
+    /// Print the stored preferences as the JSON a front-end reads.
+    #[arg(long)]
+    json: bool,
+    /// `24h` or `12h`.
+    #[arg(long)]
+    clock: Option<String>,
+    /// Hourly rows the window shows, 1–24.
+    #[arg(long)]
+    hours: Option<usize>,
+    /// The window fetches nothing and reads the last cached answers.
+    #[arg(long)]
+    offline: Option<bool>,
+    /// `metric` (mm) or `imperial`.
+    #[arg(long)]
+    units: Option<String>,
 }
 
 #[derive(Args)]
@@ -230,17 +292,20 @@ Open-Meteo returned nothing"
             let location = resolve_location(args.lat, args.lon, args.name, &config)?;
             let service = service(cli.knmi_key, cli.offline)?;
             let timezone = location.timezone.clone().unwrap_or_else(|| "auto".to_string());
+            // The stored preference is the default; --hours still wins.
+            let hours = args.hours.unwrap_or(12);
+            let clock24 = config.clock_is_24h();
             // DWD's own model inside Germany, Open-Meteo everywhere else.
             let (forecast, provider) = service.forecast(&location, &timezone).await?;
 
             if args.json && !args.raw {
                 // The labelled view, which is what the front-ends render.
-                let view = ForecastView::new(&forecast, Utc::now(), args.hours, imperial);
+                let view = ForecastView::new(&forecast, Utc::now(), hours, imperial, clock24);
                 println!("{}", serde_json::to_string_pretty(&view)?);
             } else if args.json {
                 println!("{}", serde_json::to_string_pretty(&forecast)?);
             } else {
-                print_forecast(&location, &forecast, args.hours, args.days, imperial);
+                print_forecast(&location, &forecast, hours, args.days, imperial);
                 println!(
                     "  source       : {} — {}",
                     provider.display_name(),
@@ -255,6 +320,9 @@ Open-Meteo returned nothing"
             let now = Utc::now();
             let client = OpenMeteoClient::new(service.response_cache().clone())?;
             let timezone = location.timezone.clone().unwrap_or_else(|| "auto".to_string());
+            // The window's own preferences, unless it passed --hours itself.
+            let hours = args.hours.unwrap_or_else(|| config.window_hours());
+            let clock24 = config.clock_is_24h();
 
             // All three in flight at once: separate providers, one payload, and the
             // per-provider gate still paces whatever actually leaves the machine.
@@ -304,8 +372,9 @@ Open-Meteo returned nothing"
                     air: air.as_ref(),
                     errors,
                 },
-                args.hours,
+                hours,
                 imperial,
+                clock24,
             );
 
             if args.text {
@@ -399,6 +468,48 @@ Open-Meteo returned nothing"
             config.location = Some(location.clone());
             let path = config.save()?;
             println!("default location: {location}\nconfig: {}", path.display());
+        }
+
+        Command::Prefs(args) => {
+            let mut config = config;
+            // Only what was asked for changes; everything else keeps its stored value.
+            let changed = args.clock.is_some()
+                || args.hours.is_some()
+                || args.offline.is_some()
+                || args.units.is_some();
+
+            if let Some(clock) = args.clock {
+                config.clock = Some(clock);
+            }
+            if let Some(hours) = args.hours {
+                config.hours = Some(hours.clamp(1, 24));
+            }
+            if let Some(offline) = args.offline {
+                config.offline = Some(offline);
+            }
+            if let Some(units) = args.units {
+                config.units = Some(units);
+            }
+
+            if changed {
+                config.save()?;
+            }
+
+            if args.json {
+                println!("{}", serde_json::to_string(&PrefsView::new(&config))?);
+            } else {
+                println!("clock   : {}", if config.clock_is_24h() { "24h" } else { "12h" });
+                println!("hours   : {}", config.window_hours());
+                println!("offline : {}", config.is_offline());
+                println!(
+                    "units   : {}",
+                    if config.imperial_units() { "imperial" } else { "metric" }
+                );
+                match &config.location {
+                    Some(location) => println!("location: {location}"),
+                    None => println!("location: none stored (see `rustybui set-location`)"),
+                }
+            }
         }
 
         Command::Which => {

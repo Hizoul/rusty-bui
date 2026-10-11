@@ -26,6 +26,7 @@ Item {
     window.visible = true
     Qt.callLater(function() {
       if (keyScope) keyScope.forceActiveFocus()
+      root.loadPrefs()
       root.refresh()
     })
   }
@@ -56,9 +57,26 @@ Item {
 
   property string binaryPath: setting("binaryPath", "rustybui")
   property int refreshMinutes: Number(setting("refreshMinutes", 10))
-  property int hours: Number(setting("hours", 24))
-  property bool clock24: setting("clock24", true) !== false
-  property bool offline: setting("offline", false) === true
+  // The window's own stored preferences win over the plugin's defaults, once the user has
+  // actually chosen one; until then the plugin's setting stands.
+  property int hours: Number(pref("hours", "hours", setting("hours", 24)))
+  property bool clock24: pref("clock24", "clock", setting("clock24", true) !== false) === true
+  property bool offline: pref("offline", "offline", setting("offline", false) === true) === true
+
+  // ---- the window's own settings, which the binary stores -------------------
+  property var prefs: null
+  property bool showSettings: false
+  property string searchQuery: ""
+  property var searchResults: []
+  property string searchHint: ""
+  property var pendingPlace: null
+  property var pendingPrefs: null
+
+  /// A stored preference when the user has chosen one, else `fallback`.
+  function pref(name, storedKey, fallback) {
+    if (root.prefs && root.prefs.stored && root.prefs.stored[storedKey]) return root.prefs[name]
+    return fallback
+  }
 
   // ---- data ----------------------------------------------------------------
   property var view: null
@@ -101,6 +119,144 @@ Item {
       if (exitCode === 0) return
       root.hintText = root.binaryPath + " exited " + exitCode
     }
+  }
+
+  // ---- the settings the window can change, all through the binary ----------
+  // The binary owns them (the same file the CLI reads and writes), so the window and the
+  // command line can never end up with different ideas about the location or the clock.
+
+  Process {
+    id: prefsProc
+    command: [root.binaryPath, "prefs", "--json"]
+
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          root.prefs = JSON.parse(text)
+        } catch (error) {
+          root.searchHint = "could not read the stored preferences"
+        }
+      }
+    }
+  }
+
+  function loadPrefs() {
+    if (!prefsProc.running) prefsProc.running = true
+  }
+
+  readonly property var searchCommandLine: {
+    var query = String(root.searchQuery || "").replace(/^\s+|\s+$/g, "")
+    if (query === "") return []
+    return [root.binaryPath, "search", query, "--count", "6", "--json"]
+  }
+
+  Process {
+    id: searchProc
+    command: root.searchCommandLine
+
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          var found = JSON.parse(text)
+          root.searchResults = found
+          root.searchHint = found.length === 0 ? "no matches" : ""
+        } catch (error) {
+          root.searchResults = []
+          root.searchHint = "search failed"
+        }
+      }
+    }
+
+    onExited: function(exitCode) {
+      if (exitCode !== 0) {
+        root.searchResults = []
+        root.searchHint = "search failed (exit " + exitCode + ")"
+      }
+    }
+  }
+
+  function runSearch() {
+    if (root.searchCommandLine.length === 0) return
+    root.searchHint = "searching…"
+    root.searchResults = []
+    if (!searchProc.running) searchProc.running = true
+  }
+
+  readonly property var setLocationCommandLine: {
+    var place = root.pendingPlace
+    if (!place) return []
+    var command = [
+      root.binaryPath, "set-location", place.name,
+      "--lat", String(place.latitude),
+      "--lon", String(place.longitude)
+    ]
+    if (place.country_code) command.push("--country", String(place.country_code))
+    if (place.timezone) command.push("--timezone", String(place.timezone))
+    return command
+  }
+
+  Process {
+    id: setLocationProc
+    command: root.setLocationCommandLine
+
+    onExited: function(exitCode) {
+      if (exitCode !== 0) {
+        root.searchHint = "could not store that location (exit " + exitCode + ")"
+        return
+      }
+      root.showSettings = false
+      root.searchResults = []
+      root.searchQuery = ""
+      root.searchHint = ""
+      root.loadPrefs()
+      root.refresh()
+    }
+  }
+
+  function choosePlace(place) {
+    root.pendingPlace = place
+    // The command is a binding on the pending place, so it is only complete once the
+    // assignment has landed.
+    Qt.callLater(function() {
+      if (!setLocationProc.running && root.setLocationCommandLine.length > 0)
+        setLocationProc.running = true
+    })
+  }
+
+  readonly property var savePrefsCommandLine: {
+    var change = root.pendingPrefs
+    if (!change) return []
+    return [root.binaryPath, "prefs", "--" + change.name, String(change.value), "--json"]
+  }
+
+  Process {
+    id: savePrefsProc
+    command: root.savePrefsCommandLine
+
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          root.prefs = JSON.parse(text)
+        } catch (error) {
+          root.searchHint = "could not read back the stored preferences"
+        }
+      }
+    }
+
+    onExited: function(exitCode) {
+      root.pendingPrefs = null
+      if (exitCode !== 0) root.searchHint = "could not store that preference"
+    }
+  }
+
+  function setPref(name, value) {
+    root.pendingPrefs = { name: name, value: value }
+    Qt.callLater(function() {
+      if (!savePrefsProc.running) savePrefsProc.running = true
+    })
   }
 
   // A good payload always replaces the last one; a failure keeps the last good
@@ -240,6 +396,230 @@ Item {
               color: root.muted(0.45)
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
+            }
+          }
+
+          // ---- a way in to the window's own settings --------------------------
+          // The location and the display preferences are all editable from here, through
+          // the binary, so the window does not need the command line to be usable.
+          Item {
+            width: parent.width
+            height: settingsToggle.implicitHeight
+
+            Text {
+              id: settingsToggle
+              anchors.right: parent.right
+              text: root.showSettings ? "Done" : "Settings"
+              color: root.muted(0.7)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+
+              MouseArea {
+                anchors.fill: parent
+                anchors.margins: -Style.space(4)
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  root.showSettings = !root.showSettings
+                  if (root.showSettings) root.loadPrefs()
+                }
+              }
+            }
+          }
+
+          Card {
+            id: settingsCard
+            width: parent.width
+            visible: root.showSettings
+
+            Column {
+              width: parent.width
+              spacing: Style.space(8)
+
+              Text {
+                text: "Where"
+                color: root.foreground
+                font.family: Style.font.family
+                font.pixelSize: Style.font.subtitle
+              }
+
+              Row {
+                width: parent.width
+                spacing: Style.space(6)
+
+                Rectangle {
+                  width: Math.max(Style.space(120), parent.width - searchButton.width - Style.space(6))
+                  height: Style.space(30)
+                  radius: Style.cornerRadius
+                  color: Model.withAlpha(root.foreground, 0.06)
+                  border.width: 1
+                  border.color: Model.withAlpha(root.foreground, 0.18)
+
+                  TextInput {
+                    id: searchInput
+                    anchors.fill: parent
+                    anchors.leftMargin: Style.space(8)
+                    anchors.rightMargin: Style.space(8)
+                    verticalAlignment: TextInput.AlignVCenter
+                    color: root.foreground
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.body
+                    selectByMouse: true
+                    clip: true
+                    text: root.searchQuery
+                    onTextEdited: root.searchQuery = text
+                    onAccepted: root.runSearch()
+                  }
+
+                  Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: Style.space(8)
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: searchInput.text === ""
+                    text: "Search a place…"
+                    color: root.muted(0.4)
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.body
+                  }
+                }
+
+                Rectangle {
+                  id: searchButton
+                  width: Style.space(80)
+                  height: Style.space(30)
+                  radius: Style.cornerRadius
+                  color: Model.withAlpha(root.accent, 0.18)
+
+                  Text {
+                    anchors.centerIn: parent
+                    text: "Search"
+                    color: root.foreground
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.body
+                  }
+
+                  MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.runSearch()
+                  }
+                }
+              }
+
+              Text {
+                width: parent.width
+                visible: text !== ""
+                text: root.searchHint
+                color: root.muted(0.6)
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+              }
+
+              Repeater {
+                model: root.searchResults
+
+                delegate: Rectangle {
+                  width: parent.width
+                  height: Style.space(30)
+                  radius: Style.cornerRadius
+                  color: searchRow.containsMouse ? Model.withAlpha(root.accent, 0.14) : "transparent"
+
+                  Text {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: modelData.name + (modelData.country_code ? "  ·  " + modelData.country_code : "")
+                    color: root.foreground
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.body
+                    elide: Text.ElideRight
+                  }
+
+                  MouseArea {
+                    id: searchRow
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.choosePlace(modelData)
+                  }
+                }
+              }
+
+              Text {
+                width: parent.width
+                text: {
+                  if (!root.prefs) return "Preferences are not readable right now."
+                  var place = root.prefs.location
+                  return place ? "Stored: " + place.name : "No location stored yet — search for one above."
+                }
+                color: root.muted(0.55)
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+              }
+
+              Text {
+                text: "Display"
+                color: root.foreground
+                font.family: Style.font.family
+                font.pixelSize: Style.font.subtitle
+              }
+
+              Row {
+                width: parent.width
+                spacing: Style.space(6)
+
+                Repeater {
+                  model: [
+                    {
+                      label: root.clock24 ? "24-hour clock" : "12-hour clock",
+                      name: "clock",
+                      value: root.clock24 ? "12h" : "24h"
+                    },
+                    {
+                      label: root.hours >= 24 ? "24 hours" : root.hours + " hours",
+                      name: "hours",
+                      value: root.hours >= 24 ? 12 : 24
+                    },
+                    {
+                      label: root.offline ? "Offline" : "Online",
+                      name: "offline",
+                      value: root.offline ? "false" : "true"
+                    }
+                  ]
+
+                  delegate: Rectangle {
+                    width: (parent.width - Style.space(12)) / 3
+                    height: Style.space(30)
+                    radius: Style.cornerRadius
+                    color: Model.withAlpha(root.foreground, preferenceRow.containsMouse ? 0.12 : 0.06)
+                    border.width: 1
+                    border.color: Model.withAlpha(root.foreground, 0.18)
+
+                    Text {
+                      anchors.centerIn: parent
+                      text: modelData.label
+                      color: root.foreground
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    MouseArea {
+                      id: preferenceRow
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: root.setPref(modelData.name, modelData.value)
+                    }
+                  }
+                }
+              }
+
+              Text {
+                width: parent.width
+                text: "Stored by rusty-bui, the same file the CLI reads."
+                color: root.muted(0.4)
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+              }
             }
           }
 
