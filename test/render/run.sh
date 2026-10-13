@@ -85,8 +85,15 @@ case "$case_name" in
     app_fixture=app-leiden.json
     drivers="AppDay:"
     ;;
+  keys)
+    # The key list `?` opens, and the keys around it. Same reason as `day`: only a press can show
+    # it, so this case's driver presses them.
+    bar_fixture=bar-dry.json
+    app_fixture=app-leiden.json
+    drivers="AppKeys:"
+    ;;
   *)
-    echo "unknown case: $case_name (expected dry, wet, alerts, daylight, day or map)" >&2
+    echo "unknown case: $case_name (expected dry, wet, alerts, daylight, day, keys or map)" >&2
     exit 2
     ;;
 esac

@@ -33,7 +33,9 @@ Panel {
   property string hintText: ""
   property int hoveredIndex: -1
 
-  readonly property string label: view ? Model.pillText(view) : ""
+  readonly property string label: view
+    ? Model.pillText(view, view.temperatureLabel)
+    : ""
 
   readonly property string tooltip: {
     if (!view) return errorText !== "" ? errorText : "rain nowcast"

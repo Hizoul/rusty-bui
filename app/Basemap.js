@@ -1,1 +1,0 @@
-../qml/Basemap.js

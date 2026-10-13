@@ -32,14 +32,22 @@ Without `--bind` the keybinding is only printed, so you can decide where it goes
 o.bind("SUPER + SHIFT + R", "Rain nowcast", { panel = "mmb.rainnowcast" })
 ```
 
-`SUPER + SHIFT + R` is unbound in Omarchy's default bindings. The panel can also be
-toggled by clicking the pill, by middle-clicking it to refresh, or from a shell:
+`SUPER + SHIFT + R` is unbound in Omarchy's default bindings. The panel can also be toggled by
+**right-clicking** the pill, refreshed by middle-clicking it, or opened from a shell:
 
 ```bash
 omarchy-shell shell toggle mmb.rainnowcast
 ```
 
+A **left click** opens the weather window instead (`omarchy-shell shell toggle mmb.weather '{}'`)
+— the pill is the bar's way into both surfaces. Right-click is not reserved by the bar: the
+built-in widgets use it the same way.
+
 ## Settings
+
+The pill shows the rain state with the temperature beside it (`󰖐 21m 12.2°`) — the label is built
+by the binary, so it is already in whatever units are configured (`rustybui prefs --units`), and
+a forecast that cannot be had leaves the pill with the rain state alone.
 
 Defaults live in `manifest.json`; override them inline in `~/.config/omarchy/shell.json`
 under the widget's `bar.layout` entry:

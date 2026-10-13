@@ -37,11 +37,14 @@ and one round of cache-aware requests:
 - **Rain nowcast** — the same `NowcastChart.qml` the bar popout draws: one bar per radar
   frame, hour ticks, a now marker, mm/h axis, plus the sentence and the status line.
 - **Rain map** — DWD's radar composite over a vendored coastline, drag to move it, wheel to
-  zoom, and a stepper that walks the frames from an hour back to the end of the nowcast. The
-  stepper's clock carries how far off that frame is ("18:38 · in 25 min"), since the extent runs
-  both ways from now, and a legend in the corner gives DWD's own rain-rate bands in their own
-  colours — read from the legend the service publishes rather than redrawn from memory, so the
-  two cannot disagree.
+  zoom, and a stepper that walks the frames from an hour back to the end of the nowcast. The map
+  **plays on its own** from the oldest frame, looping, and steps only once the picture it asked
+  for has arrived — so the clock on the stepper always names the frame you are actually looking
+  at. It pauses when the window is closed (the window is kept loaded, and a hidden map fetching a
+  frame every 700 ms is not free). The stepper's clock carries how far off that frame is
+  ("18:38 · in 25 min"), since the extent runs both ways from now, and a legend in the corner
+  gives DWD's own rain-rate bands in their own colours — read from the legend the service
+  publishes rather than redrawn from memory, so the two cannot disagree.
 - **Next hours** — a scrollable strip with the glyph, temperature and precipitation
   probability per hour. Day and night glyphs come from the computed sun times, not a clock
   window.
@@ -121,6 +124,26 @@ It is the same provider choice as the forecast — DWD inside Germany, Open-Mete
 falling back to the other — asked for a single date. A day that has already happened is kept for
 a day rather than re-fetched every time the row is reopened; today's is asked for again. The
 window's day card and the CLI's `day` print the same payload, so the two cannot drift.
+
+## Keys
+
+`?` lists them in the window; anything it helps you do dismisses it.
+
+| key | what it does |
+|-----|--------------|
+| `?` | the list itself |
+| `/` | open the settings and search for a place |
+| `↑` `↓` | walk the day list — the cursor row is ringed |
+| `Enter` | open that day's hours |
+| `m` | jump to the map |
+| `s` | settings: location, clock, hours, units, offline |
+| `r` | fetch everything again |
+| `Esc` | back out of one layer at a time: the list, then the settings, then the window |
+
+The keys and the list are one thing — a key that is not on the list is a key that does not work —
+so both live beside each other in `App.qml` (`pressKey` and `keyList`). `pressKey` is a function
+rather than being written inside `Keys.onPressed` so the render harness can press them too
+(`test/render/drivers/AppKeys.qml`).
 
 ## Where the data comes from
 

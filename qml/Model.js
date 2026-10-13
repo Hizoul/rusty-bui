@@ -53,12 +53,19 @@ function glyphFor(view) {
 }
 
 // Compact bar label: the glyph, plus the current rate or the wait.
-function pillText(view) {
-  if (!view || !view.summary) return GLYPH.dry
+/// The pill: the rain state, with the temperature beside it when the payload carries one — the
+/// binary formats that label, so the units preference is already applied by the time it arrives.
+/// The glyph already says "dry", so the word only stands in when there is no number to take its
+/// place.
+function pillText(view, temperatureLabel) {
+  var degrees = temperatureLabel ? String(temperatureLabel) : ""
+  if (!view || !view.summary) return degrees ? GLYPH.dry + " " + degrees : GLYPH.dry
   var summary = view.summary
-  if (summary.isRainingNow) return glyphFor(view) + " " + shortIntensity(summary.currentMmPerHour)
-  if (isSet(summary.startsInMinutes)) return glyphFor(view) + " " + compactMinutes(summary.startsInMinutes)
-  return GLYPH.dry
+  var state = ""
+  if (summary.isRainingNow) state = glyphFor(view) + " " + shortIntensity(summary.currentMmPerHour)
+  else if (isSet(summary.startsInMinutes)) state = glyphFor(view) + " " + compactMinutes(summary.startsInMinutes)
+  else state = GLYPH.dry
+  return degrees ? state + " " + degrees : state
 }
 
 function compactMinutes(minutes) {
@@ -584,6 +591,18 @@ function nowFrameIndex(framesMs, nowMs) {
   for (var i = 1; i < times.length; i++)
     if (Math.abs(Number(times[i]) - at) < Math.abs(Number(times[best]) - at)) best = i
   return best
+}
+
+/// Which of the frames a picture of that instant is: the index the map should be labelling. A
+/// payload carries one image at a time, so while an animation steps faster than the service
+/// answers, the picture on screen is of an earlier frame — and a label taken from the frame the
+/// map *asked* for would put a time on a picture it does not belong to.
+function frameIndexAt(framesMs, timeMs) {
+  var times = frameTimes(framesMs)
+  if (!times.length || !isSet(timeMs)) return -1
+  var at = Number(timeMs)
+  for (var i = 0; i < times.length; i++) if (Number(times[i]) === at) return i
+  return -1
 }
 
 /// How far off that frame is, said the way the rest of the app says it: "in 20 min", "35 min ago",

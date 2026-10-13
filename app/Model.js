@@ -1,1 +1,0 @@
-../qml/Model.js

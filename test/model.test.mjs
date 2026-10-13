@@ -108,6 +108,17 @@ check(
 )
 check("…and it draws a wait rather than a rate", Model.pillText(wetFixture.view).indexOf("\ue318") === 0, true)
 
+// The temperature the binary formats, in whatever units are configured, sits beside the rain
+// state; without one the pill is exactly as it was, and with one the word "dry" gives way to it.
+check("the temperature rides beside the rain state", Model.pillText(base, "13.2°"), "\ue318 25m 13.2°")
+check("and on an imperial machine it is labelled as such",
+  Model.pillText(dry.view, "55.8°F"),
+  Model.GLYPH.dry + " 55.8°F")
+check("a dry pill with a temperature says the number, not the word",
+  Model.pillText(dry.view, "13.2°").indexOf("dry"), -1)
+check("with nothing to say at all it is still just the glyph", Model.pillText(dry.view), Model.GLYPH.dry)
+check("and a missing temperature leaves the pill untouched", Model.pillText(base, null), "\ue318 25m")
+
 // ---- the app payload (`rustybui app`)
 const app = Model.parseApp(appPayload)
 check("parses the captured app payload", app.ok, true)
@@ -333,6 +344,19 @@ check("an hour of nowcast reads as hours and minutes",
   [Model.frameAge(now + 65 * 60000, now), Model.frameAge(now - 125 * 60000, now)],
   ["in 1 h 05", "2 h 05 ago"])
 check("and a frame with no time says nothing", Model.frameAge(null, now), "")
+
+// ---- the loop, and what the label is allowed to claim
+// The map plays on its own, and steps only when the picture has caught up — these are the two
+// helpers that decide which frame the stepper may name.
+const framesMs = [0, 300000, 600000, 900000].map(minutes => now + minutes)
+check("a picture is placed at its own frame", Model.frameIndexAt(framesMs, framesMs[2]), 2)
+check("the oldest frame is frame nought", Model.frameIndexAt(framesMs, framesMs[0]), 0)
+check("a picture from no known frame is not placed at all",
+  [Model.frameIndexAt(framesMs, now + 450000), Model.frameIndexAt(framesMs, null), Model.frameIndexAt([], now)],
+  [-1, -1, -1])
+check("and an unordered frame list is matched by time, not by position",
+  Model.frameIndexAt([framesMs[3], framesMs[1], framesMs[0], framesMs[2]], framesMs[3]),
+  3)
 
 console.log(failures === 0 ? "\nall model checks passed" : `\n${failures} check(s) failed`)
 process.exit(failures === 0 ? 0 : 1)

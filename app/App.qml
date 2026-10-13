@@ -452,12 +452,16 @@ Item {
     }
   }
 
-  /// Brings the day card into view. A row near the end of the list opens a card that starts
-  /// below the window, and a detail nobody can see is a detail nobody asked for.
-  function revealDay() {
-    if (!scroller || !dayCard) return
-    var wanted = dayCard.y - Style.space(8)
+  /// Brings a card into view. A row near the end of the list opens a card that starts below the
+  /// window, and a detail nobody can see is a detail nobody asked for.
+  function reveal(item) {
+    if (!scroller || !item) return
+    var wanted = item.y - Style.space(8)
     scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, wanted))
+  }
+
+  function revealDay() {
+    root.reveal(dayCard)
   }
 
   /// Opens a day, or closes it when it is the one already open.
@@ -516,6 +520,86 @@ Item {
     if (day.sunriseLabel && day.sunsetLabel) parts.push(day.sunriseLabel + " → " + day.sunsetLabel)
     return parts.join(" · ")
   }
+
+  // ---- the keyboard ---------------------------------------------------------
+  // One entry point, so the same keys can be exercised from a harness as from the window: a
+  // handler that only exists inside `Keys.onPressed` can be rendered but never pressed.
+  property bool showKeys: false
+  property int dayCursor: -1
+
+  function pressKey(key, text) {
+    var character = String(text === undefined || text === null ? "" : text).toLowerCase()
+    switch (key) {
+      case Qt.Key_Question:
+        root.showKeys = !root.showKeys
+        return true
+      case Qt.Key_Escape:
+        // Escape backs out of one layer at a time: the key list, then the settings, then the window.
+        if (root.showKeys) root.showKeys = false
+        else if (root.showSettings) root.showSettings = false
+        else if (root.dayDetail !== null) root.closeDay()
+        else root.requestClose()
+        return true
+      case Qt.Key_Slash:
+        root.showKeys = false
+        root.showSettings = true
+        Qt.callLater(function() { if (searchInput) searchInput.forceActiveFocus() })
+        return true
+      case Qt.Key_Up:
+      case Qt.Key_Down:
+        if (!root.dailyRows.length) return false
+        root.showKeys = false
+        var step = key === Qt.Key_Down ? 1 : -1
+        var from = root.dayCursor < 0 ? (step > 0 ? -1 : 0) : root.dayCursor
+        root.dayCursor = Math.max(0, Math.min(root.dailyRows.length - 1, from + step))
+        return true
+      case Qt.Key_Return:
+      case Qt.Key_Enter:
+        if (root.dayCursor < 0 || root.dayCursor >= root.dailyRows.length) return false
+        root.showKeys = false
+        root.openDay(root.dailyRows[root.dayCursor])
+        return true
+      case Qt.Key_M:
+        root.showKeys = false
+        root.reveal(mapCard)
+        return true
+      case Qt.Key_S:
+        // The list is help, not a mode: anything it helps you do dismisses it.
+        root.showKeys = false
+        root.showSettings = !root.showSettings
+        return true
+      case Qt.Key_R:
+      case Qt.Key_F5:
+        root.refresh()
+        return true
+      default:
+        // A layout where "?" needs no modifier arrives as its own key; one where it does arrives
+        // as the question mark's key code too, so only the character needs checking.
+        if (character === "?") {
+          root.showKeys = !root.showKeys
+          return true
+        }
+        if (character === "/") {
+          root.showSettings = true
+          Qt.callLater(function() { if (searchInput) searchInput.forceActiveFocus() })
+          return true
+        }
+        return false
+    }
+  }
+
+  /// The keys the window answers to, in the order worth learning them. The list and the handler
+  /// are one thing: a key that is not here is a key that does not work.
+  readonly property var keyList: [
+    { keys: "?", what: "this list" },
+    { keys: "/", what: "search for a place" },
+    { keys: "↑ ↓", what: "walk the day list" },
+    { keys: "Enter", what: "open that day's hours" },
+    { keys: "m", what: "jump to the map" },
+    { keys: "s", what: "settings — location, clock, units" },
+    { keys: "r", what: "fetch everything again" },
+    { keys: "Esc", what: "back out of whatever is open" }
+  ]
 
   // A good payload always replaces the last one; a failure keeps the last good
   // screen visible and only records why.
@@ -598,11 +682,95 @@ Item {
       anchors.fill: parent
       focus: true
 
-      Keys.onEscapePressed: root.requestClose()
+      Keys.onEscapePressed: function(event) {
+        root.pressKey(Qt.Key_Escape, "")
+        event.accepted = true
+      }
+
       Keys.onPressed: function(event) {
-        if (event.key === Qt.Key_R || event.key === Qt.Key_F5) {
-          root.refresh()
-          event.accepted = true
+        event.accepted = root.pressKey(event.key, event.text)
+      }
+
+      // ---- the key list ---------------------------------------------------
+      // `?` puts the keys on screen. A list that is not there when you need it is a list nobody
+      // reads, and this is the one place they are written down.
+      Item {
+        id: keyOverlay
+        anchors.fill: parent
+        visible: root.showKeys
+        z: 20
+
+        Rectangle {
+          anchors.fill: parent
+          color: Model.withAlpha(root.background, 0.72)
+
+          MouseArea {
+            anchors.fill: parent
+            onClicked: root.showKeys = false
+          }
+        }
+
+        Card {
+          anchors.centerIn: parent
+          width: Math.min(parent.width - Style.space(24), keyColumn.width + Style.space(20))
+          height: keyColumn.height + Style.space(16)
+
+          Column {
+            id: keyColumn
+            width: keyRows.width
+            spacing: Style.space(4)
+
+            Text {
+              text: "Keys"
+              color: root.foreground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.subtitle
+            }
+
+            Column {
+              id: keyRows
+              spacing: Style.space(3)
+
+              Repeater {
+                model: root.keyList
+
+                delegate: Item {
+                  required property var modelData
+                  width: Math.max(keyName.implicitWidth, Style.space(48)) + Style.space(12) + keyWhat.implicitWidth
+                  height: Math.max(keyName.implicitHeight, keyWhat.implicitHeight)
+
+                  Text {
+                    id: keyName
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.max(implicitWidth, Style.space(48))
+                    text: modelData.keys
+                    color: root.accent
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.body
+                  }
+
+                  Text {
+                    id: keyWhat
+                    anchors.left: parent.left
+                    anchors.leftMargin: Math.max(keyName.width, Style.space(48)) + Style.space(12)
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: modelData.what
+                    color: root.muted(0.8)
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.body
+                  }
+                }
+              }
+            }
+
+            Text {
+              text: "Esc or ? closes this"
+              color: root.muted(0.45)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+          }
         }
       }
 
@@ -1353,6 +1521,7 @@ Item {
           // DWD's composite, which answers in the projection it is asked for, over coastlines
           // vendored from Natural Earth. Drag it, wheel to zoom, step through the frames.
           Card {
+            id: mapCard
             width: parent.width
             visible: root.view !== null
 
@@ -1390,6 +1559,9 @@ Item {
                 theme: root.theme
                 clock24: root.clock24
                 notice: root.radarNotice
+                // The window is kept loaded between summons: a map still playing behind a closed
+                // window would keep asking for one image per frame.
+                active: window.visible
 
                 onImageNeeded: function(bbox, width, height, timeMs) {
                   root.requestRadar(bbox, width, height, timeMs)
@@ -1448,16 +1620,21 @@ Item {
                   width: parent.width
                   height: Math.max(dayGlyph.implicitHeight, dayHigh.implicitHeight) + Style.space(6)
 
-                  // The whole row opens that day's hours; the open one is the one that closes.
+                  // The whole row opens that day's hours; the open one is the one that closes. The
+                  // cursor is the row the keyboard is on, which is a third thing again.
                   readonly property bool opened: root.dayDetail !== null
                     && String(root.dayDetail.date) === String(modelData.date)
+                  readonly property bool cursored: index === root.dayCursor
 
                   Rectangle {
                     anchors.fill: parent
                     anchors.leftMargin: -Style.space(6)
                     anchors.rightMargin: -Style.space(6)
                     radius: Style.cornerRadius
-                    color: Model.withAlpha(root.foreground, opened ? 0.1 : (dayRow.containsMouse ? 0.06 : 0))
+                    color: Model.withAlpha(root.foreground,
+                      opened ? 0.1 : (cursored ? 0.07 : (dayRow.containsMouse ? 0.06 : 0)))
+                    border.width: cursored ? 1 : 0
+                    border.color: Model.withAlpha(root.accent, 0.7)
                   }
 
                   MouseArea {
@@ -1739,7 +1916,7 @@ Item {
 
             Text {
               width: parent.width
-              text: "R refresh · Esc close"
+              text: "? for the keys · r refresh · Esc close"
               color: root.muted(0.35)
               font.family: Style.font.family
               font.pixelSize: Style.font.caption

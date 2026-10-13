@@ -27,6 +27,9 @@ Item {
   property var radar: null
   property var theme: ({ foreground: "#cacccc", accent: "#3b82f6", urgent: "#ef4444" })
   property bool clock24: true
+  /// Whether the map is on screen at all. The window is kept loaded between summons, so a map
+  /// left playing would keep fetching images for a window nobody is looking at.
+  property bool active: true
   // Said under the map by the host, when there is something to say (a failed fetch, a frame
   // list the service would not give, and so on).
   property string notice: ""
@@ -41,7 +44,17 @@ Item {
   /// The view: { centerLon, centerLat, spanLon, width, height }, all of it the map's own.
   property var view: null
   property int frameIndex: -1
-  property bool playing: false
+  /// The radar loop runs on its own: a map that has to be started is a map that mostly sits still.
+  property bool playing: true
+
+  /// The frame the picture on screen is actually of — what the stepper should be labelling. A
+  /// payload carries one image, so while the loop runs ahead of the service the image is of an
+  /// earlier frame; a label taken from `frameIndex` would then put a time on a picture it is not.
+  readonly property int shownFrame: {
+    if (!frames.length) return -1
+    var at = Model.frameIndexAt(frames, map.image ? map.image.timeMs : null)
+    return at >= 0 ? at : frameIndex
+  }
 
   // The map takes the width it is given and keeps a map-shaped height, the stepper and the
   // credit line hanging under it.
@@ -98,8 +111,19 @@ Item {
       frameIndex = -1
       return
     }
-    if (frameIndex < 0 || frameIndex >= times.length)
-      frameIndex = Model.nowFrameIndex(times, Date.now())
+    if (frameIndex < 0 || frameIndex >= times.length) {
+      // A loop starts at the oldest frame it has, or the animation would begin half way through
+      // and only reach the beginning after a full pass. Standing still, the useful frame is the
+      // one nearest now.
+      const wanted = map.playing ? 0 : Model.nowFrameIndex(times, Date.now())
+      frameIndex = wanted
+      // The request goes out on the next turn of the event loop: a change handler runs before the
+      // bindings that depend on the changed property are re-evaluated, so `frames` — and anything
+      // computed from it, `goToFrame` included — is still the old list in here.
+      Qt.callLater(function() {
+        if (view && frames.length) goToFrame(wanted)
+      })
+    }
     // A payload can leave the map still wanting a different picture — a wider view after a
     // first fetch that was clipped to the coverage, say.
     settle.restart()
@@ -136,16 +160,32 @@ Item {
 
   Timer {
     id: playback
-    interval: 800
+    interval: 700
     repeat: true
-    running: map.playing
-    onTriggered: {
-      if (map.frameIndex >= map.frames.length - 1) {
-        map.playing = false
-        return
-      }
-      map.goToFrame(map.frameIndex + 1)
-    }
+    // Two frames is the least that can move; a hidden window plays to nobody.
+    running: map.playing && map.active && map.frames.length > 1
+    onTriggered: map.stepForward(false)
+  }
+
+  // A frame that never arrives must not end the animation. After a pause long enough for a slow
+  // answer, the loop walks on regardless and the label keeps telling the truth about which frame
+  // is on screen, rather than the two of them disagreeing for the rest of the session.
+  Timer {
+    id: stalled
+    interval: 6000
+    repeat: false
+    onTriggered: map.stepForward(true)
+  }
+
+  /// One frame on, wrapping at the end: a radar loop that halts at the last frame is a loop that
+  /// has to be started again every time. Unless `force`, a step waits for the picture to catch up
+  /// with the frame that was asked for, so the map never outruns the service and never labels a
+  /// picture with a time it is not.
+  function stepForward(force) {
+    if (!frames.length) return
+    if (!force && shownFrame !== frameIndex) return
+    goToFrame(frameIndex >= frames.length - 1 ? 0 : frameIndex + 1)
+    stalled.restart()
   }
 
   // ---- the map itself ------------------------------------------------------
@@ -472,9 +512,9 @@ Item {
       // The frame's own clock, and how far off it is: the extent runs from an hour or two back
       // to two hours ahead, so "20:15" alone does not say whether that is past or forecast.
       text: {
-        if (!(map.frameIndex >= 0 && map.frames.length)) return "–"
-        var clock = Model.formatClock(map.frames[map.frameIndex], map.clock24)
-        var age = Model.frameAge(map.frames[map.frameIndex], Date.now())
+        if (!(map.shownFrame >= 0 && map.frames.length)) return "–"
+        var clock = Model.formatClock(map.frames[map.shownFrame], map.clock24)
+        var age = Model.frameAge(map.frames[map.shownFrame], Date.now())
         return age === "" || age === "now" ? clock : clock + " · " + age
       }
       color: map.theme.foreground
@@ -542,7 +582,7 @@ Item {
           width: Style.space(3)
           height: Style.space(3)
           radius: width / 2
-          color: index === map.frameIndex
+          color: index === map.shownFrame
             ? map.theme.accent
             : Model.withAlpha(map.theme.foreground, 0.4)
           x: map.frames.length > 1

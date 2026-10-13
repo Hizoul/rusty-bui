@@ -354,18 +354,42 @@ Open-Meteo returned nothing"
         Command::Bar(args) => {
             let location = resolve_location(args.lat, args.lon, args.name, &config)?;
             let service = service(cli.knmi_key, cli.offline)?;
+            let timezone = location.timezone.clone().unwrap_or_else(|| "auto".to_string());
+            // The pill reads the rain state and the temperature together, and the label is built
+            // here rather than in QML so the units preference is applied in the one place that
+            // formats everything else. The forecast is the slower of the two requests and has its
+            // own freshness window, so a pill polling every five minutes rarely asks for it — and
+            // when it cannot be had, the pill falls back to the rain state alone.
+            let temperature = service
+                .forecast(&location, &timezone)
+                .await
+                .ok()
+                .and_then(|(forecast, _)| forecast.current)
+                .and_then(|current| current.temperature_c)
+                .map(|celsius| format_temperature(celsius, imperial));
 
             match service.nowcast(&location, cli.refresh).await {
                 Some(nowcast) => {
                     let view = NowcastView::new(&location, &nowcast, Utc::now(), imperial);
                     if args.json {
-                        println!("{}", serde_json::to_string(&view)?);
+                        // The popout takes the nowcast view from this payload; the temperature
+                        // rides along so the pill needs one process rather than two.
+                        let mut value = serde_json::to_value(&view)?;
+                        if let (Some(object), Some(temperature)) =
+                            (value.as_object_mut(), temperature.clone())
+                        {
+                            object.insert(
+                                "temperatureLabel".to_string(),
+                                serde_json::Value::String(temperature),
+                            );
+                        }
+                        println!("{}", value);
                     } else if args.text {
-                        println!("{}", view.bar_text());
+                        println!("{}", bar_text(&view, temperature.as_deref()));
                     } else {
                         // Waybar/Omarchy inline module contract.
                         let payload = serde_json::json!({
-                            "text": view.bar_text(),
+                            "text": bar_text(&view, temperature.as_deref()),
                             "alt": view.bar_class(),
                             "class": view.bar_class(),
                             "tooltip": view.sentence(),
@@ -840,6 +864,16 @@ fn service(knmi_key: Option<String>, offline: bool) -> Result<NowcastService> {
     Ok(NowcastService::new(knmi_key)?
         .offline(offline)?
         .with_cache(DiskCache::new()))
+}
+
+/// The pill's own text: the rain state, and the temperature beside it when the payload carries
+/// one. The glyph already says "dry", so the word only stands in when there is no number to take
+/// its place.
+fn bar_text(view: &NowcastView, temperature: Option<&str>) -> String {
+    match temperature {
+        Some(degrees) => format!("{} {degrees}", view.bar_text()),
+        None => view.bar_text(),
+    }
 }
 
 /// Where the answers came from, so it is obvious when a run was served from disk.

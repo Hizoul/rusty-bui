@@ -15,11 +15,14 @@ container/render-qml.sh /path/to/omarchy-checkout map    # the radar map on its 
 
 Three drivers run against whichever case is asked for: `App.qml` (the window), `AppSettings.qml`
 (the same window with its settings open, grabbing with a `settings-` prefix so the two images
-stay apart) and `Pill.qml` (the bar pill and the popout it opens); two cases have drivers of
+stay apart) and `Pill.qml` (the bar pill and the popout it opens); three cases have drivers of
 their own, because what they show cannot be reached by rendering the window alone — `AppDay.qml`
-clicks a day row to open it, and `Map.qml` renders the map, which is the one card that fetches
-for itself (and grabs it twice: once where it opens, on the frame nearest now, and once at the far
-end of the extent, since the age the stepper adds to a frame's clock is only visible out there).
+clicks a day row to open it, `AppKeys.qml` presses the window's keys and photographs the list
+`?` opens, and `Map.qml` renders the map, which is the one card that fetches for itself. That
+driver grabs three times rather than twice, because the map plays on its own and one image cannot
+show a loop: where it opens (the oldest frame), where it has got to a few seconds later with the
+picture keeping up with the frame asked for, and the far end of the extent, where the frame's age
+is on the stepper.
 The fixtures come from `test/fixtures/`, and the payloads have synthetic variants for
 states a quiet day cannot show (`make-bar-wet.py`, `make-app-alerts.py`, `make-app-daylight.py`
 for a sun that is still up and a moon big enough to see). Two more are generators rather than

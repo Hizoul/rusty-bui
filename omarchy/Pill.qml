@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
@@ -77,6 +78,15 @@ BarWidget {
     }
   }
 
+  // The pill is the bar's way into both surfaces: a click on the left opens the whole window, a
+  // click on the right the nowcast popout on its own, and the middle button refetches. The bar's
+  // WidgetButton reports which button it was, so this is a matter of saying which is which — and
+  // right-click is fair game, as the built-in widgets use it for exactly this.
+  Process {
+    id: windowOpener
+    command: ["omarchy-shell", "-q", "shell", "toggle", "mmb.weather", "{}"]
+  }
+
   // A text pill rather than the icon-only slot: the point of this widget is the
   // number — the current rate when it rains, the wait when it does not.
   WidgetButton {
@@ -93,7 +103,8 @@ BarWidget {
     onPressed: function(b) {
       if (!root.bar) return
       if (b === Qt.MiddleButton) root.refresh()
-      else root.togglePanel()
+      else if (b === Qt.RightButton) root.togglePanel()
+      else if (!windowOpener.running) windowOpener.running = true
     }
   }
 }
