@@ -175,7 +175,7 @@ fi
 # works for a bar widget's popout, which is what the pill's detail panel is. The
 # `{ panel = "<id>" }` shorthand is for panel plugins and is left as a comment below.
 pill_bind='o.bind("SUPER + SHIFT + R", "Rain nowcast", "omarchy-shell -q shell toggle mmb.rainnowcast")'
-window_bind='o.bind("SUPER + ALT + W", "Weather window", "omarchy-shell -q shell toggle mmb.weather '"'"'{}'"'"'")'
+window_bind='o.bind("SUPER + ALT + W", "Weather window", "omarchy-shell -q shell toggle mmb.weather")'
 
 if ((dry)); then
   echo "== would add these keybindings to $bindings (with --bind):"
