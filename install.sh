@@ -207,16 +207,33 @@ fi
 # ── 5. window rule ────────────────────────────────────────────────────────────
 # The weather window is a Quickshell window — class `org.quickshell`, title `Weather`.
 # Tiled, it opens into the workspace beside whatever is already there; it is an overlay,
-# so it should float and open at the top, clear of the bar. Hyprland decides that, not the
-# plugin, so the rule goes in the user's own config. A previous rusty-bui weather rule is
-# replaced, so changing the placement later updates it instead of being skipped.
+# so it should float and open flush with the bar, exactly where the nowcast popout sits.
+# Hyprland decides that, not the plugin, so the rule goes in the user's own config. A
+# previous rusty-bui weather rule is replaced, so changing the placement later updates it
+# instead of being skipped.
 rules="$HOME/.config/hypr/hyprland.lua"
-rule_comment='-- rusty-bui: the weather window floats and opens at the top, below the bar'
-window_rule='o.window({ class = "^org.quickshell$", title = "^Weather$" }, { float = true, move = { "(monitor_w-window_w)/2", "34" } })'
+
+# Where the bar's popouts sit: the bar surface's height plus the look'n'feel's outer gap
+# (Omarchy's `Style.gapsOut` is half of Hyprland's `general:gaps_out`). Reading both keeps
+# the window flush with the nowcast popout instead of guessing a number that suits one theme.
+bar_height=26
+gap=0
+if command -v hyprctl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  detected_bar_height="$(hyprctl layers -j 2>/dev/null |
+    jq -r '[.. | objects | select(.namespace? == "omarchy-bar") | .h] | max // empty' 2>/dev/null || true)"
+  [[ $detected_bar_height =~ ^[0-9]+$ ]] && bar_height="$detected_bar_height"
+  gaps_out="$(hyprctl getoption general:gaps_out -j 2>/dev/null |
+    jq -r '.css // empty' 2>/dev/null | awk '{print $1}' || true)"
+  [[ $gaps_out =~ ^[0-9]+$ ]] && gap=$(((gaps_out + 1) / 2))
+fi
+top=$((bar_height + gap))
+
+rule_comment='-- rusty-bui: the weather window floats and opens flush with the bar'
+window_rule="o.window({ class = \"^org.quickshell$\", title = \"^Weather$\" }, { float = true, move = { \"(monitor_w-window_w)/2\", \"$top\" } })"
 
 if ((dry)); then
   echo
-  echo "== would write this into $rules:"
+  echo "== would write this into $rules (bar ${bar_height} + gap ${gap} = ${top}):"
   printf '   %s\n   %s\n' "$rule_comment" "$window_rule"
 elif [[ -f $rules ]]; then
   if grep -qF "$window_rule" "$rules"; then

@@ -26,11 +26,13 @@ On the Omarchy machine, from a checkout of this repo:
 ```
 
 The installer also adds one Hyprland window rule to `~/.config/hypr/hyprland.lua`, so the
-weather window floats and opens at the top instead of tiling into the workspace:
+weather window floats and opens flush with the bar — the same top edge the nowcast popout
+uses — instead of tiling into the workspace. The offset is read from the running bar's height
+and the look'n'feel's outer gap, so it does not have to be hand-tuned:
 
 ```lua
--- The weather window floats and opens at the top, below the bar.
-o.window({ class = "^org.quickshell$", title = "^Weather$" }, { float = true, move = { "(monitor_w-window_w)/2", "34" } })
+-- The weather window floats and opens flush with the bar.
+o.window({ class = "^org.quickshell$", title = "^Weather$" }, { float = true, move = { "(monitor_w-window_w)/2", "26" } })
 ```
 
 Without `--bind` the keybinding is only printed, so you can decide where it goes in

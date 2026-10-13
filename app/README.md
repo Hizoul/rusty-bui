@@ -8,7 +8,9 @@ omarchy-shell shell toggle mmb.weather '{}'
 ```
 
 It is a `panel`-kind plugin, so it lives inside the long-running `omarchy-shell`
-process — no second Quickshell instance, and it inherits the active theme for free.
+process — no second Quickshell instance, and it inherits the active theme for free. It draws
+the same popup surface as the bar's popouts — the theme's fill, border, corner radius and
+padding — and `install.sh` places it flush with the bar, so the two read as one family.
 
 ```
 manifest.json   plugin contract: one panel, kept loaded between summons

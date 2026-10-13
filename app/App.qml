@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Commons as Commons
+import qs.Ui
 import "Model.js" as Model
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -675,7 +676,10 @@ Item {
   FloatingWindow {
     id: window
     title: "Weather"
-    color: root.background
+    // The window paints nothing itself: the frame below carries the surface, so the theme's
+    // border and corner radius are drawn rather than left to a compositor whose border the
+    // look'n'feel has turned off.
+    color: "transparent"
     implicitWidth: Style.space(620)
     // Three quarters of the monitor's height, so the window reads as an overlay: the bar and
     // the workspace stay visible, while the nowcast, the map and the first days are reachable
@@ -703,9 +707,26 @@ Item {
       if (!visible && root.opened && !root.closingFromHost) root.requestClose()
     }
 
+    // The frame: the shell's popup surface — the popup role's fill and border, the theme's
+    // corner radius, the popout's padding — so the window reads as the nowcast's larger
+    // sibling rather than a bare rectangle behind the cards. The FocusScope is inset to the
+    // frame's content box, so the content sits inside the border and the padding.
+    BorderSurface {
+      id: frame
+      anchors.fill: parent
+      color: Commons.Color.popups.background
+      radius: Style.cornerRadius
+      borderSpec: Border.surfaceSpec("popups", "border", Commons.Color.popups.border, Math.max(1, Style.space(2)))
+      padding: Style.spacing.popupPadding
+    }
+
     FocusScope {
       id: keyScope
       anchors.fill: parent
+      anchors.topMargin: frame.contentTopInset
+      anchors.rightMargin: frame.contentRightInset
+      anchors.bottomMargin: frame.contentBottomInset
+      anchors.leftMargin: frame.contentLeftInset
       focus: true
 
       Keys.onEscapePressed: function(event) {
@@ -803,7 +824,6 @@ Item {
       Flickable {
         id: scroller
         anchors.fill: parent
-        anchors.margins: Style.spacing.panelPadding
         contentWidth: width
         contentHeight: column.implicitHeight
         clip: true
