@@ -32,13 +32,18 @@ Item {
     running: true
     onTriggered: {
       // `?` opens the list and any key that acts on the window dismisses it; Esc backs out one
-      // layer at a time. The log carries the state after each press, the image carries the list.
+      // layer at a time. The scrolling keys walk the blocks now, and the day list moved to n/p,
+      // so press both kinds and let the log say how each was handled.
       app.pressKey(Qt.Key_Question, "?")
       var listed = app.showKeys
       app.pressKey(Qt.Key_Down, "")
       app.pressKey(Qt.Key_Down, "")
-      var cursor = app.dayCursor
       var dismissedByArrow = !app.showKeys
+      var jHandled = app.pressKey(Qt.Key_J, "j")
+      var kHandled = app.pressKey(Qt.Key_K, "k")
+      app.pressKey(Qt.Key_N, "")
+      app.pressKey(Qt.Key_N, "")
+      var cursor = app.dayCursor
       app.pressKey(Qt.Key_Question, "?")
       app.pressKey(Qt.Key_M, "m")
       var dismissedByMap = !app.showKeys
@@ -51,8 +56,11 @@ Item {
       app.pressKey(Qt.Key_Question, "?")
 
       console.log("harness: day rows=" + app.dailyRows.length
+        + " · blocks=" + app.scrollStops.length
         + " · ?→listed=" + listed
-        + " · ↓↓→cursor=" + cursor + " (list dismissed: " + dismissedByArrow + ")"
+        + " · ↓↓→dismissed=" + dismissedByArrow
+        + " · j/k handled=" + jHandled + "/" + kHandled
+        + " · nn→cursor=" + cursor
         + " · m→dismissed=" + dismissedByMap
         + " · s→settings=" + settings
         + " · Esc closes the list first: " + escapeClosesList

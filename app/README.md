@@ -138,7 +138,8 @@ window's day card and the CLI's `day` print the same payload, so the two cannot 
 |-----|--------------|
 | `?` | the list itself |
 | `/` | open the settings and search for a place |
-| `↑` `↓` | walk the day list — the cursor row is ringed |
+| `↑` `↓` (`k` `j`) | scroll block by block — the next card's top lands flush with the window's |
+| `n` `p` | walk the day list — the cursor row is ringed |
 | `Enter` | open that day's hours |
 | `m` | jump to the map |
 | `s` | settings: location, clock, hours, units, offline |
@@ -149,6 +150,14 @@ The keys and the list are one thing — a key that is not on the list is a key t
 so both live beside each other in `App.qml` (`pressKey` and `keyList`). `pressKey` is a function
 rather than being written inside `Keys.onPressed` so the render harness can press them too
 (`test/render/drivers/AppKeys.qml`).
+
+The scrolling keys walk the window's cards — settings, warnings, now, sun and moon, nowcast, map,
+hours, days, the opened day, air, the footer — rather than the day list, which keeps `n`/`p`. The
+masthead and the settings affordance are page furniture, not stops. `scrollStops` is a binding over
+those cards filtered to the visible ones, so a card that is not on screen (the settings card, the
+opened day, the warnings when there are none) is not a place to land, and opening one inserts it.
+Each step reads where the wheel actually left the view rather than a remembered cursor, and lands
+the chosen block's top flush with the top of the window so the order reads the same every time.
 
 ## Where the data comes from
 

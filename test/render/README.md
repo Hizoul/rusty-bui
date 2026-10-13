@@ -10,6 +10,7 @@ container/render-qml.sh /path/to/omarchy-checkout wet    # rain in about 20 minu
 container/render-qml.sh /path/to/omarchy-checkout alerts  # warnings in force
 container/render-qml.sh /path/to/omarchy-checkout daylight # the sun still up, the moon a crescent
 container/render-qml.sh /path/to/omarchy-checkout day    # a day in the list opened up
+container/render-qml.sh /path/to/omarchy-checkout keys   # the `?` key list, and the keys around it
 container/render-qml.sh /path/to/omarchy-checkout map    # the radar map on its own
 ```
 

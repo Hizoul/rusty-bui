@@ -623,6 +623,61 @@ Item {
   property bool showKeys: false
   property int dayCursor: -1
 
+  // ---- stepping through the window's blocks ---------------------------------
+  // The blocks the keys walk, in the order they are drawn. The masthead and the settings
+  // affordance are page furniture, not stops: only the cards the window is about. And only
+  // what is on screen — a hidden card is not a place to land — so the list is a binding, and
+  // opening the settings or a day inserts that card as a stop for as long as it is there.
+  readonly property var scrollStops: [
+    settingsCard, warnings,
+    nowCard, skyCard, nowcastCard, mapCard,
+    hoursCard, daysCard, dayCard, airCard, footer
+  ].filter(function(item) { return item && item.visible })
+
+  /// Where the top of `item` sits in the scrolled content, clamped to what can be scrolled to.
+  function stopOffset(item) {
+    var furthest = Math.max(0, scroller.contentHeight - scroller.height)
+    return Math.max(0, Math.min(furthest, item.y))
+  }
+
+  /// Puts one block's top flush with the top of the window, so every step lands the same way.
+  function scrollToStop(item) {
+    if (!scroller || !item) return
+    scroller.contentY = root.stopOffset(item)
+  }
+
+  /// Steps to the first block below (or the last above) where the view actually rests — the
+  /// wheel can leave the list anywhere, and the keys should carry on from there rather than
+  /// from wherever the keyboard was last.
+  function stepSection(direction) {
+    var stops = root.scrollStops
+    if (stops.length === 0 || !scroller) return false
+    var index = -1
+    if (direction > 0) {
+      for (var down = 0; down < stops.length; down++) {
+        if (root.stopOffset(stops[down]) > scroller.contentY + 1) { index = down; break }
+      }
+      if (index < 0) index = stops.length - 1
+    } else {
+      for (var up = stops.length - 1; up >= 0; up--) {
+        if (root.stopOffset(stops[up]) < scroller.contentY - 1) { index = up; break }
+      }
+      if (index < 0) index = 0
+    }
+    root.scrollToStop(stops[index])
+    return true
+  }
+
+  /// Moves the ring in the day list. It used to be the arrow keys' job; they now scroll the
+  /// window, and the list keeps n/p so Enter still has something to open.
+  function stepDay(direction) {
+    if (!root.dailyRows.length) return false
+    root.showKeys = false
+    var from = root.dayCursor < 0 ? (direction > 0 ? -1 : 0) : root.dayCursor
+    root.dayCursor = Math.max(0, Math.min(root.dailyRows.length - 1, from + direction))
+    return true
+  }
+
   function pressKey(key, text) {
     var character = String(text === undefined || text === null ? "" : text).toLowerCase()
     switch (key) {
@@ -643,12 +698,15 @@ Item {
         return true
       case Qt.Key_Up:
       case Qt.Key_Down:
-        if (!root.dailyRows.length) return false
+      case Qt.Key_J:
+      case Qt.Key_K:
+        // One key, one block: ↑/k and ↓/j walk the window from wherever the view rests.
+        if (!root.stepSection(key === Qt.Key_Up || key === Qt.Key_K ? -1 : 1)) return false
         root.showKeys = false
-        var step = key === Qt.Key_Down ? 1 : -1
-        var from = root.dayCursor < 0 ? (step > 0 ? -1 : 0) : root.dayCursor
-        root.dayCursor = Math.max(0, Math.min(root.dailyRows.length - 1, from + step))
         return true
+      case Qt.Key_N:
+      case Qt.Key_P:
+        return root.stepDay(key === Qt.Key_N ? 1 : -1)
       case Qt.Key_Return:
       case Qt.Key_Enter:
         if (root.dayCursor < 0 || root.dayCursor >= root.dailyRows.length) return false
@@ -695,7 +753,8 @@ Item {
   readonly property var keyList: [
     { keys: "?", what: "this list" },
     { keys: "/", what: "search for a place" },
-    { keys: "↑ ↓", what: "walk the day list" },
+    { keys: "↑ ↓ · j k", what: "scroll block by block" },
+    { keys: "n p", what: "walk the day list" },
     { keys: "Enter", what: "open that day's hours" },
     { keys: "m", what: "jump to the map" },
     { keys: "s", what: "settings — location, clock, units" },
@@ -1504,6 +1563,7 @@ Item {
 
           // ---- now ------------------------------------------------------------
           Card {
+            id: nowCard
             width: parent.width
             visible: root.current !== null
 
@@ -1588,6 +1648,7 @@ Item {
           // The sun's times come from the provider when it has them and from the arithmetic when
           // it does not — which is every DWD day. The moon is arithmetic either way.
           Card {
+            id: skyCard
             width: parent.width
             visible: root.sky !== null
 
@@ -1682,6 +1743,7 @@ Item {
 
           // ---- rain nowcast --------------------------------------------------
           Card {
+            id: nowcastCard
             width: parent.width
             visible: root.nowcast !== null
 
@@ -1795,6 +1857,7 @@ Item {
 
           // ---- next hours ----------------------------------------------------
           Card {
+            id: hoursCard
             width: parent.width
             visible: root.hourlyRows.length > 0
 
@@ -1820,6 +1883,7 @@ Item {
 
           // ---- days ----------------------------------------------------------
           Card {
+            id: daysCard
             width: parent.width
             visible: root.dailyRows.length > 0
 
@@ -2033,6 +2097,7 @@ Item {
 
           // ---- air -----------------------------------------------------------
           Card {
+            id: airCard
             width: parent.width
             visible: root.air !== null
 
@@ -2084,6 +2149,7 @@ Item {
 
           // ---- provenance and failures ---------------------------------------
           Column {
+            id: footer
             width: parent.width
             spacing: Style.space(4)
 
