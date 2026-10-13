@@ -28,7 +28,7 @@ app/                   window plugin: App.qml
 test/                  node checks of Model.js against captured payloads
 scripts/               staging, used by install.sh and by the QML check
 container/             Containerfile + helper scripts for podman
-install.sh             build, install both plugins, launcher entry, keybindings
+install.sh             build, install both plugins, launcher entry, float rule, keybindings
 ```
 
 The two plugin directories link to the shared files in `qml/` so an editor and `qmllint`
@@ -76,7 +76,7 @@ so all caching and rate limiting stays in one place.
 On the Omarchy machine, from a checkout:
 
 ```bash
-./install.sh             # build, install both plugins, launcher entry, keybindings
+./install.sh             # build, install both plugins, launcher entry, float rule
 ./install.sh --bind      # …and add the keybindings to ~/.config/hypr/bindings.lua
 ./install.sh --dry-run   # say what it would do, write nothing
 ```
@@ -88,8 +88,9 @@ replaces a plugin's files wholesale. It also needs no toolchain: it reports the 
 directory rather than building.
 
 That installs the binary to `~/.local/bin`, stages and validates both plugins into
-`~/.config/omarchy/plugins/`, writes the launcher entry and adds the keybindings to
-`~/.config/hypr/bindings.lua`. See `omarchy/README.md` and `app/README.md` for settings
+`~/.config/omarchy/plugins/`, writes the launcher entry, adds a Hyprland window rule that
+floats the weather window and opens it at the top, and (with `--bind`) adds the keybindings
+to `~/.config/hypr/bindings.lua`. See `omarchy/README.md` and `app/README.md` for settings
 and attribution.
 
 ## Usage

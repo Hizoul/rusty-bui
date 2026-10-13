@@ -18,7 +18,41 @@
     "defaults": {
       "binaryPath": "rustybui",
       "pollMinutes": 5,
-      "clock24": true
-    }
+      "clock24": true,
+      "showIcon": true,
+      "showState": true,
+      "showTemperature": true,
+      "iconSide": "left"
+    },
+    "schema": [
+      {
+        "key": "showIcon",
+        "type": "boolean",
+        "label": "Show the weather icon",
+        "defaultValue": true,
+        "description": "The rain/cloud glyph. With the rain state off too, it is the only thing that can say it is dry."
+      },
+      {
+        "key": "showState",
+        "type": "boolean",
+        "label": "Show the rain state",
+        "defaultValue": true,
+        "description": "The number: the rate while it rains, the wait when it is coming. Nothing when it is dry."
+      },
+      {
+        "key": "showTemperature",
+        "type": "boolean",
+        "label": "Show the temperature",
+        "defaultValue": true
+      },
+      {
+        "key": "iconSide",
+        "type": "enum",
+        "label": "Icon position",
+        "options": ["left", "right"],
+        "defaultValue": "left",
+        "description": "Where the icon sits when it is shown: before the rain state and temperature, or after them."
+      }
+    ]
   }
 }

@@ -27,6 +27,10 @@ BarWidget {
     if ("binaryPath" in target) target.binaryPath = String(root.setting("binaryPath", "rustybui"))
     if ("pollMinutes" in target) target.pollMinutes = Number(root.setting("pollMinutes", 5))
     if ("clock24" in target) target.clock24 = root.setting("clock24", true) !== false
+    if ("showIcon" in target) target.showIcon = root.setting("showIcon", true) !== false
+    if ("showState" in target) target.showState = root.setting("showState", true) !== false
+    if ("showTemperature" in target) target.showTemperature = root.setting("showTemperature", true) !== false
+    if ("iconSide" in target) target.iconSide = String(root.setting("iconSide", "left")) === "right" ? "right" : "left"
   }
 
   function refresh() {

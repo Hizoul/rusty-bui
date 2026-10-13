@@ -28,13 +28,25 @@ Panel {
   property int pollMinutes: 5
   property bool clock24: true
 
+  // Which parts the pill carries, and which side the icon sits on. Set from the bar widget's
+  // own Omarchy settings; the defaults are the pill as it has always looked.
+  property bool showIcon: true
+  property bool showState: true
+  property bool showTemperature: true
+  property string iconSide: "left"
+
   property var view: null
   property string errorText: ""
   property string hintText: ""
   property int hoveredIndex: -1
 
   readonly property string label: view
-    ? Model.pillText(view, view.temperatureLabel)
+    ? Model.pillText(view, view.temperatureLabel, {
+        showIcon: root.showIcon,
+        showState: root.showState,
+        showTemperature: root.showTemperature,
+        iconSide: root.iconSide
+      })
     : ""
 
   readonly property string tooltip: {

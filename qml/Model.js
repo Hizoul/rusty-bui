@@ -52,20 +52,42 @@ function glyphFor(view) {
   return GLYPH.dry
 }
 
-// Compact bar label: the glyph, plus the current rate or the wait.
-/// The pill: the rain state, with the temperature beside it when the payload carries one — the
-/// binary formats that label, so the units preference is already applied by the time it arrives.
-/// The glyph already says "dry", so the word only stands in when there is no number to take its
-/// place.
-function pillText(view, temperatureLabel) {
+/// The pill: the rain state, the temperature, and the icon, each optional and arranged by
+/// `options` — `{ showIcon, showState, showTemperature, iconSide }`. The state is the rain
+/// number ("25m", "2.4"); the icon is the weather glyph and the only thing that can carry
+/// "dry" on its own, so the word stands in when every part is turned off. The temperature is
+/// the binary's own label, so its units are already whatever the machine is set to.
+function pillText(view, temperatureLabel, options) {
+  options = options || {}
+  var showIcon = options.showIcon !== false
+  var showState = options.showState !== false
+  var showTemperature = options.showTemperature !== false
+  var iconRight = options.iconSide === "right"
+
   var degrees = temperatureLabel ? String(temperatureLabel) : ""
-  if (!view || !view.summary) return degrees ? GLYPH.dry + " " + degrees : GLYPH.dry
-  var summary = view.summary
+  var hasView = !!(view && view.summary)
+  var summary = hasView ? view.summary : null
+  var glyph = hasView ? glyphFor(view) : GLYPH.dry
+
+  // Dry has no rate and no wait: the icon is what says "dry", so there is no state text.
   var state = ""
-  if (summary.isRainingNow) state = glyphFor(view) + " " + shortIntensity(summary.currentMmPerHour)
-  else if (isSet(summary.startsInMinutes)) state = glyphFor(view) + " " + compactMinutes(summary.startsInMinutes)
-  else state = GLYPH.dry
-  return degrees ? state + " " + degrees : state
+  if (hasView && showState) {
+    if (summary.isRainingNow) state = shortIntensity(summary.currentMmPerHour)
+    else if (isSet(summary.startsInMinutes)) state = compactMinutes(summary.startsInMinutes)
+  }
+
+  var icon = showIcon ? glyph : ""
+  var temp = showTemperature ? degrees : ""
+
+  var parts = iconRight ? [state, temp, icon] : [icon, state, temp]
+  var text = parts
+    .filter(function(part) { return part !== "" })
+    .join(" ")
+
+  // Turning every part off must not wipe the pill out of the bar: the word the summary already
+  // carries ("dry") is the one thing that can still be said, and it keeps the widget clickable.
+  if (text === "") text = hasView && summary.currentLabel ? String(summary.currentLabel) : "dry"
+  return text
 }
 
 function compactMinutes(minutes) {

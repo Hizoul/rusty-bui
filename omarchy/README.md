@@ -25,6 +25,14 @@ On the Omarchy machine, from a checkout of this repo:
 ./install.sh --bind     # build, install both plugins, place the pill, add the keybinding
 ```
 
+The installer also adds one Hyprland window rule to `~/.config/hypr/hyprland.lua`, so the
+weather window floats and opens at the top instead of tiling into the workspace:
+
+```lua
+-- The weather window floats and opens at the top, below the bar.
+o.window({ class = "^org.quickshell$", title = "^Weather$" }, { float = true, move = { "(monitor_w-window_w)/2", "34" } })
+```
+
 Without `--bind` the keybinding is only printed, so you can decide where it goes in
 `~/.config/hypr/bindings.lua`. The line it adds is:
 
@@ -45,22 +53,29 @@ built-in widgets use it the same way.
 
 ## Settings
 
-The pill shows the rain state with the temperature beside it (`󰖐 21m 12.2°`) — the label is built
-by the binary, so it is already in whatever units are configured (`rustybui prefs --units`), and
-a forecast that cannot be had leaves the pill with the rain state alone.
-
-Defaults live in `manifest.json`; override them inline in `~/.config/omarchy/shell.json`
-under the widget's `bar.layout` entry:
-
-```json
-{ "id": "mmb.rainnowcast", "binaryPath": "/home/you/.local/bin/rustybui", "pollMinutes": 5, "clock24": false }
-```
+The pill's own pieces are all optional, so it can be as busy or as bare as you like. The label is
+built from the binary's payload, so the temperature is already in whatever units are configured
+(`rustybui prefs --units`), and a forecast that cannot be had leaves the pill with the rain state
+alone.
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
 | `binaryPath` | `rustybui` | The binary to run; absolute if it is not on the shell's `PATH` |
 | `pollMinutes` | `5` | How often the pill asks for a fresh view (radar republishes every 5 min) |
 | `clock24` | `true` | 12-hour clock in the popout when false |
+| `showIcon` | `true` | The rain/cloud glyph. With `showState` off too, it is the only thing that can say it is dry. |
+| `showState` | `true` | The number: the rate while it rains, the wait when it is coming. Nothing when it is dry. |
+| `showTemperature` | `true` | The current temperature. |
+| `iconSide` | `left` | `left` → `󰖐 21m 12.2°`; `right` → `21m 12.2° 󰖐`. Only matters when the icon is shown. |
+
+Turning every part off leaves the word the summary already carries (`dry`), so the pill never
+disappears and stays clickable. The four display settings are editable from Omarchy's own
+bar-widget settings — the manifest carries a `schema` for them — or inline in
+`~/.config/omarchy/shell.json` under the widget's `bar.layout` entry:
+
+```json
+{ "id": "mmb.rainnowcast", "binaryPath": "/home/you/.local/bin/rustybui", "pollMinutes": 5, "clock24": false, "showIcon": true, "showState": true, "showTemperature": true, "iconSide": "left" }
+```
 
 Move it elsewhere on the bar with `omarchy bar move mmb.rainnowcast --section left`.
 

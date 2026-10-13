@@ -204,6 +204,42 @@ else
   echo "  (as a panel plugin bind, if you prefer: { panel = \"mmb.rainnowcast\" })"
 fi
 
+# ── 5. window rule ────────────────────────────────────────────────────────────
+# The weather window is a Quickshell window — class `org.quickshell`, title `Weather`.
+# Tiled, it opens into the workspace beside whatever is already there; it is an overlay,
+# so it should float and open at the top, clear of the bar. Hyprland decides that, not the
+# plugin, so the rule goes in the user's own config. A previous rusty-bui weather rule is
+# replaced, so changing the placement later updates it instead of being skipped.
+rules="$HOME/.config/hypr/hyprland.lua"
+rule_comment='-- rusty-bui: the weather window floats and opens at the top, below the bar'
+window_rule='o.window({ class = "^org.quickshell$", title = "^Weather$" }, { float = true, move = { "(monitor_w-window_w)/2", "34" } })'
+
+if ((dry)); then
+  echo
+  echo "== would write this into $rules:"
+  printf '   %s\n   %s\n' "$rule_comment" "$window_rule"
+elif [[ -f $rules ]]; then
+  if grep -qF "$window_rule" "$rules"; then
+    echo "== weather window rule already present in $rules"
+  elif grep -qF 'title = "^Weather$"' "$rules"; then
+    tmp="$(mktemp)"
+    awk -v rule="$window_rule" -v comment="$rule_comment" '
+      index($0, "title = \"^Weather$\"") { print rule; next }
+      index($0, "-- rusty-bui: the weather window") { print comment; next }
+      { print }
+    ' "$rules" >"$tmp"
+    mv "$tmp" "$rules"
+    echo "== updated the weather window rule in $rules (reload with: hyprctl reload)"
+  else
+    {
+      printf '\n%s\n%s\n' "$rule_comment" "$window_rule"
+    } >>"$rules"
+    echo "== added the weather window rule to $rules (reload with: hyprctl reload)"
+  fi
+else
+  echo "no $rules — skipping the weather window rule" >&2
+fi
+
 if ((dry)); then
   echo
   echo "== dry run done: nothing was installed"

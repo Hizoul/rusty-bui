@@ -119,6 +119,20 @@ check("a dry pill with a temperature says the number, not the word",
 check("with nothing to say at all it is still just the glyph", Model.pillText(dry.view), Model.GLYPH.dry)
 check("and a missing temperature leaves the pill untouched", Model.pillText(base, null), "\ue318 25m")
 
+// ---- what the pill is made of, each part switchable and the icon pickable
+const parts = { showIcon: true, showState: true, showTemperature: true, iconSide: "left" }
+check("the icon can be dropped", Model.pillText(base, "13.2°", { ...parts, showIcon: false }), "25m 13.2°")
+check("the rain state can be dropped", Model.pillText(base, "13.2°", { ...parts, showState: false }), "\ue318 13.2°")
+check("the temperature can be dropped", Model.pillText(base, "13.2°", { ...parts, showTemperature: false }), "\ue318 25m")
+check("the icon can sit on the right", Model.pillText(base, "13.2°", { ...parts, iconSide: "right" }), "25m 13.2° \ue318")
+check("dropping the state also moves the icon with it",
+  Model.pillText(base, "13.2°", { ...parts, showState: false, iconSide: "right" }), "13.2° \ue318")
+check("a dry pill with the icon off keeps its word rather than disappearing",
+  Model.pillText(dry.view, null, { ...parts, showIcon: false, showState: false, showTemperature: false }),
+  dry.view.summary.currentLabel)
+check("and with the state off the dry icon still says dry on its own",
+  Model.pillText(dry.view, "13.2°", { ...parts, showState: false }), Model.GLYPH.dry + " 13.2°")
+
 // ---- the app payload (`rustybui app`)
 const app = Model.parseApp(appPayload)
 check("parses the captured app payload", app.ok, true)

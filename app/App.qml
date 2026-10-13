@@ -677,7 +677,15 @@ Item {
     title: "Weather"
     color: root.background
     implicitWidth: Style.space(620)
-    implicitHeight: Style.space(780)
+    // Three quarters of the monitor's height, so the window reads as an overlay: the bar and
+    // the workspace stay visible, while the nowcast, the map and the first days are reachable
+    // without scrolling past everything. `window.screen` is in logical pixels, so this holds
+    // on any display; a fixed 780 was most of this machine's screen already. The fallback is
+    // that old 780 for the moment before Quickshell has placed the surface on a screen.
+    readonly property real screenHeight: window.screen && window.screen.height > 0
+      ? window.screen.height
+      : Style.space(1040)
+    implicitHeight: Math.max(Style.space(480), Math.round(screenHeight * 0.75))
     // The shape Omarchy's own dev-gallery uses; Quickshell's FloatingWindow adds both to
     // QQuickWindow, so the window still has to be checked against the real shell and not
     // only against the render-harness stub.
