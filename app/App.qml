@@ -19,11 +19,22 @@ Item {
   id: root
 
   // ---- plugin lifecycle (the shape the shell's summon routing expects) -----
+  // `opened` is the state the shell reads back to answer `isPluginOpen`; the window
+  // is shown and hidden from it rather than being visible of its own accord. That
+  // matters here because the plugin is keepLoaded: the shell mounts it at startup,
+  // and a Quickshell window is visible by default, so without this the window would
+  // open on every shell restart.
+  property bool opened: false
   property bool closingFromHost: false
+
+  function syncWindowVisibility() {
+    window.visible = root.opened
+  }
+  onOpenedChanged: Qt.callLater(syncWindowVisibility)
 
   function open(payloadJson) {
     closingFromHost = false
-    window.visible = true
+    opened = true
     Qt.callLater(function() {
       if (keyScope) keyScope.forceActiveFocus()
       root.loadPrefs()
@@ -35,7 +46,7 @@ Item {
   // so do not report back.
   function close() {
     closingFromHost = true
-    window.visible = false
+    opened = false
     closingFromHost = false
   }
 
@@ -43,7 +54,7 @@ Item {
   // panel bookkeeping stays consistent and `toggle` works next time.
   function requestClose() {
     if (shell && typeof shell.hide === "function") shell.hide("mmb.weather")
-    else window.visible = false
+    else close()
   }
 
   // ---- host injections -----------------------------------------------------
@@ -671,10 +682,17 @@ Item {
     // QQuickWindow, so the window still has to be checked against the real shell and not
     // only against the render-harness stub.
     minimumSize: Qt.size(Style.space(480), Style.space(480))
+    // Starts hidden and only appears when the shell summons it. Declared explicitly so
+    // a keepLoaded mount at shell start never paints a frame before syncWindowVisibility()
+    // runs; the first sync drops the binding and drives it imperatively from there on.
+    visible: false
 
+    Component.onCompleted: root.syncWindowVisibility()
+
+    // A close the host did not ask for — the window manager's close button — still has
+    // to reach the shell, or `opened` would stay true and the next toggle would hide.
     onVisibleChanged: {
-      if (!visible && !root.closingFromHost && root.shell && typeof root.shell.hide === "function")
-        root.shell.hide("mmb.weather")
+      if (!visible && root.opened && !root.closingFromHost) root.requestClose()
     }
 
     FocusScope {

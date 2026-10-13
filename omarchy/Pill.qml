@@ -95,9 +95,6 @@ BarWidget {
     bar: root.bar
     text: panelLoader.item ? panelLoader.item.label : ""
     tooltipText: panelLoader.item ? panelLoader.item.tooltip : ""
-    // The label opens with an icon-font glyph, whose figure metrics say nothing
-    // about the glyph.
-    centerFigures: false
     fontSize: Style.font.body
 
     onPressed: function(b) {

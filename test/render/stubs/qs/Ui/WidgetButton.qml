@@ -11,7 +11,6 @@ Item {
   property var bar: null
   property string text: ""
   property string tooltipText: ""
-  property bool centerFigures: true
   property int fontSize: Style.font.body
 
   signal pressed(int button)
