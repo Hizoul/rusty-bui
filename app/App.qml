@@ -39,6 +39,10 @@ Item {
     Qt.callLater(function() {
       if (keyScope) keyScope.forceActiveFocus()
       root.loadPrefs()
+      // The pill's settings live in shell.json, which the shell writes atomically; the file
+      // watch misses that rename, so reread on every open — a window that has been shut is a
+      // window that is about to show values it did not see change.
+      if (shellConfigFile) shellConfigFile.reload()
       root.refresh()
     })
   }
@@ -221,6 +225,82 @@ Item {
 
   function loadPrefs() {
     if (!prefsProc.running) prefsProc.running = true
+  }
+
+  // ---- the bar pill's display settings -------------------------------------
+  // These live in Omarchy's own settings (shell.json, beside the widget in the bar layout), not
+  // in the binary's file, so the window edits them the way any bar widget's settings are: through
+  // `omarchy bar set`, which the shell then hands to the pill as its `settings`. Reading shell.json
+  // back is what lets the controls show the current value rather than a guess.
+  property var pillSettings: ({ showIcon: true, showState: true, showTemperature: true, iconSide: "left" })
+  property var pendingPillSetting: null
+
+  readonly property var pillCommandLine: {
+    var change = root.pendingPillSetting
+    if (!change) return []
+    return ["omarchy", "bar", "set", "mmb.rainnowcast", String(change.name), JSON.stringify(change.value), "--json"]
+  }
+
+  Process {
+    id: pillSettingProc
+    command: root.pillCommandLine
+
+    onExited: function(exitCode) {
+      root.pendingPillSetting = null
+      if (exitCode === 0) {
+        if (shellConfigFile) shellConfigFile.reload()
+      } else {
+        root.searchHint = "could not store the pill setting"
+      }
+    }
+  }
+
+  function setPillSetting(name, value) {
+    // Show the change at once, then let shell.json be the source of truth again when it is read
+    // back; the pill updates from the shell's `settings` the moment the write lands.
+    var next = ({})
+    for (var key in root.pillSettings) next[key] = root.pillSettings[key]
+    next[name] = value
+    root.pillSettings = next
+    root.pendingPillSetting = { name: name, value: value }
+    Qt.callLater(function() {
+      if (!pillSettingProc.running && root.pillCommandLine.length > 0) pillSettingProc.running = true
+    })
+  }
+
+  function readPillSettings(raw) {
+    var parsed = null
+    try {
+      parsed = JSON.parse(String(raw || ""))
+    } catch (error) {
+      return
+    }
+    var layout = parsed && parsed.bar && parsed.bar.layout ? parsed.bar.layout : null
+    if (!layout) return
+    var sections = ["left", "center", "right"]
+    for (var s = 0; s < sections.length; s++) {
+      var entries = Array.isArray(layout[sections[s]]) ? layout[sections[s]] : []
+      for (var i = 0; i < entries.length; i++) {
+        if (entries[i] && entries[i].id === "mmb.rainnowcast") {
+          root.pillSettings = {
+            showIcon: entries[i].showIcon !== false,
+            showState: entries[i].showState !== false,
+            showTemperature: entries[i].showTemperature !== false,
+            iconSide: String(entries[i].iconSide || "left") === "right" ? "right" : "left"
+          }
+          return
+        }
+      }
+    }
+  }
+
+  FileView {
+    id: shellConfigFile
+    path: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.readPillSettings(text())
+    onFileChanged: root.readPillSettings(text())
   }
 
   readonly property var searchCommandLine: {
@@ -476,6 +556,10 @@ Item {
     root.reveal(dayCard)
   }
 
+  function revealSettings() {
+    root.reveal(settingsCard)
+  }
+
   /// Opens a day, or closes it when it is the one already open.
   function openDay(day) {
     if (!day) return
@@ -579,6 +663,10 @@ Item {
         // The list is help, not a mode: anything it helps you do dismisses it.
         root.showKeys = false
         root.showSettings = !root.showSettings
+        if (root.showSettings) {
+          root.loadPrefs()
+          Qt.callLater(root.revealSettings)
+        }
         return true
       case Qt.Key_R:
       case Qt.Key_F5:
@@ -593,6 +681,8 @@ Item {
         }
         if (character === "/") {
           root.showSettings = true
+          root.loadPrefs()
+          Qt.callLater(root.revealSettings)
           Qt.callLater(function() { if (searchInput) searchInput.forceActiveFocus() })
           return true
         }
@@ -829,6 +919,20 @@ Item {
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         interactive: contentHeight > height
+        // The built-in wheel step is conservative; one notch here is one notch's worth of pixels,
+        // so a window this tall does not feel stuck. Touchpads keep their own pixel deltas.
+        flickDeceleration: 3000
+        maximumFlickVelocity: 4000
+
+        WheelHandler {
+          acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+          onWheel: function(event) {
+            var delta = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y
+            if (delta === 0) return
+            scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, scroller.contentY - delta))
+            event.accepted = true
+          }
+        }
 
         Column {
           id: column
@@ -892,7 +996,10 @@ Item {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
                   root.showSettings = !root.showSettings
-                  if (root.showSettings) root.loadPrefs()
+                  if (root.showSettings) {
+                    root.loadPrefs()
+                    Qt.callLater(root.revealSettings)
+                  }
                 }
               }
             }
@@ -1206,6 +1313,76 @@ Item {
                     }
                   }
                 }
+              }
+
+              Text {
+                text: "Pill"
+                color: root.foreground
+                font.family: Style.font.family
+                font.pixelSize: Style.font.subtitle
+              }
+
+              Row {
+                width: parent.width
+                spacing: Style.space(6)
+
+                Repeater {
+                  model: [
+                    {
+                      label: root.pillSettings.showIcon ? "Icon" : "No icon",
+                      name: "showIcon",
+                      value: !root.pillSettings.showIcon
+                    },
+                    {
+                      label: root.pillSettings.showState ? "Rain state" : "No state",
+                      name: "showState",
+                      value: !root.pillSettings.showState
+                    },
+                    {
+                      label: root.pillSettings.showTemperature ? "Temperature" : "No temp",
+                      name: "showTemperature",
+                      value: !root.pillSettings.showTemperature
+                    },
+                    {
+                      label: root.pillSettings.iconSide === "right" ? "Icon right" : "Icon left",
+                      name: "iconSide",
+                      value: root.pillSettings.iconSide === "right" ? "left" : "right"
+                    }
+                  ]
+
+                  delegate: Rectangle {
+                    width: (parent.width - Style.space(18)) / 4
+                    height: Style.space(30)
+                    radius: Style.cornerRadius
+                    color: Model.withAlpha(root.foreground, pillRow.containsMouse ? 0.12 : 0.06)
+                    border.width: 1
+                    border.color: Model.withAlpha(root.foreground, 0.18)
+
+                    Text {
+                      anchors.centerIn: parent
+                      text: modelData.label
+                      color: root.foreground
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    MouseArea {
+                      id: pillRow
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: root.setPillSetting(modelData.name, modelData.value)
+                    }
+                  }
+                }
+              }
+
+              Text {
+                width: parent.width
+                text: "The bar pill's own parts, stored in Omarchy's settings and applied live."
+                color: root.muted(0.4)
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
               }
 
               Text {

@@ -72,8 +72,11 @@ rustybui prefs --json           # what a front-end reads, including which ones a
 ```
 
 They can equally be changed from inside the window (the **Settings** affordance in the
-masthead), which is the point: searching for a place, storing it and switching the clock all
+masthead, or `s`), which is the point: searching for a place, storing it and switching the clock all
 go through `set-location` and `prefs`, so the window and the command line can never disagree.
+The **Pill** row in the same card edits the bar widget's own display settings (`showIcon`,
+`showState`, `showTemperature`, `iconSide`); those live in Omarchy's settings rather than the
+binary's file, so the row writes them through `omarchy bar set` and the pill updates live.
 The plugin's own `settings` — `binaryPath`, `refreshMinutes` — come from Omarchy and act as
 defaults for anything the user has not chosen here.
 

@@ -71,9 +71,10 @@ alone.
 | `iconSide` | `left` | `left` → `󰖐 21m 12.2°`; `right` → `21m 12.2° 󰖐`. Only matters when the icon is shown. |
 
 Turning every part off leaves the word the summary already carries (`dry`), so the pill never
-disappears and stays clickable. The four display settings are editable from Omarchy's own
-bar-widget settings — the manifest carries a `schema` for them — or inline in
-`~/.config/omarchy/shell.json` under the widget's `bar.layout` entry:
+disappears and stays clickable. The four display settings are editable from the weather
+window's own Settings card (`s`, the **Pill** row), which writes them through
+`omarchy bar set`; from Omarchy's bar-widget settings — the manifest carries a `schema` for
+them; or inline in `~/.config/omarchy/shell.json` under the widget's `bar.layout` entry:
 
 ```json
 { "id": "mmb.rainnowcast", "binaryPath": "/home/you/.local/bin/rustybui", "pollMinutes": 5, "clock24": false, "showIcon": true, "showState": true, "showTemperature": true, "iconSide": "left" }
