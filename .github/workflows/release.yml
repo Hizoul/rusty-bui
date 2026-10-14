@@ -1,0 +1,68 @@
+# Build prebuilt rustybui binaries on a version tag and attach them to the release.
+#
+# Tag like `v0.1.0` (bump Cargo.toml workspace.version and both manifest.json
+# versions in the same commit). produces:
+#   rustybui-v0.1.0-x86_64.tar.gz
+#   rustybui-v0.1.0-aarch64.tar.gz    (cross-compiled; smoke-checked by `--help`)
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            host: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            host: ubuntu-24.04
+    runs-on: ${{ matrix.host }}
+    env:
+        CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cross-linker (aarch64 only)
+        if: matrix.target != 'x86_64-unknown-linux-gnu'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-aarch64-linux-gnu
+
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release -p rustybui-cli --target ${{ matrix.target }}
+
+      - name: Smoke check
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: target/${{ matrix.target }}/release/rustybui --help > /dev/null
+
+      - name: Package
+        run: |
+          ver=${GITHUB_REF_NAME#v}
+          tar -czf "rustybui-v${ver}-${{ matrix.target }}.tar.gz" \
+            -C "target/${{ matrix.target }}/release" rustybui
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rustybui-${{ matrix.target }}
+          path: rustybui-*.tar.gz
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

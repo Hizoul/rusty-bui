@@ -3,7 +3,7 @@
   "id": "mmb.weather",
   "name": "Weather",
   "version": "0.1.0",
-  "author": "rusty-bui",
+  "author": "Matthias MB (@Hizoul)",
   "description": "Weather window: current conditions, the two-hour rain nowcast, hourly and daily outlook, air quality — from KNMI, DWD and Open-Meteo",
   "kinds": ["panel"],
   "keepLoaded": true,

@@ -1,0 +1,110 @@
+# Push the bar-pill plugin to the standalone mirror repo after every push to main.
+#
+# `omarchy plugin add <url>` clones a whole repository and validates its ROOT
+# manifest, so this dev repo cannot be the installable unit. The mirror —
+# Hizoul/omarchy-weather-nowcast — holds exactly one plugin at its root:
+#
+#   manifest.json   (copy of omarchy/manifest.json)
+#   Pill.qml, RainPanel.qml, Model.js, NowcastChart.qml
+#   README.md       (install instructions, binary requirement)
+#
+# Setup, once:
+#   1. Create the mirror repo: gh repo create Hizoul/omarchy-weather-nowcast --public
+#   2. Add a fine-grained PAT with Contents:write on that repo as the
+#      MIRROR_TOKEN secret of THIS repository.
+#
+# The staged tree is dereferenced (no symlinks) and validated with the same
+# checks upstream's omarchy-plugin-validate would run, so a broken commit
+# cannot reach the mirror.
+
+name: publish-plugin-mirror
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stage the pill plugin
+        run: |
+          mkdir -p /tmp/staged/mmb.rainnowcast
+          # The pill subtree, plus the shared QML it imports.
+          cp -L omarchy/manifest.json omarchy/Pill.qml omarchy/RainPanel.qml \
+                qml/Model.js qml/NowcastChart.qml \
+                /tmp/staged/mmb.rainnowcast/
+
+      - name: Validate the staged plugin (mirrors omarchy-plugin-validate)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq jq >/dev/null
+          dir=/tmp/staged/mmb.rainnowcast
+          test -f "$dir/manifest.json"
+          jq -e '.schemaVersion == 1' "$dir/manifest.json" > /dev/null
+          for field in id name version kinds entryPoints; do
+            jq -e --arg f "$field" 'has($f)' "$dir/manifest.json" > /dev/null
+          done
+          for ep in $(jq -r '.entryPoints[]' "$dir/manifest.json"); do
+            case "$ep" in /*|*..*|*\n*) exit 1;; esac
+            test -f "$dir/$ep"
+          done
+          test -z "$(find "$dir" -type l -print -quit)"
+
+      - name: Push to the mirror
+        env:
+          MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
+          MIRROR_REPO: Hizoul/omarchy-weather-nowcast
+        run: |
+          plugin=$(ls /tmp/staged)
+          mirror="$(mktemp -d)/mirror"
+          git clone --depth 1 \
+            "https://x-access-token:${MIRROR_TOKEN}@github.com/${MIRROR_REPO}.git" "$mirror"
+          cd "$mirror"
+          # Mirror = the plugin folder contents, nothing else.
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a "/tmp/staged/$plugin/." .
+          cat > README.md <<'EOF'
+          # Weather nowcast — bar widget for Omarchy
+
+          Rain for the next two hours, at radar resolution, in the Omarchy 4 bar.
+          Mirrors the `mmb.rainnowcast` plugin generated from
+          [Hizoul/rusty-bui](https://github.com/Hizoul/rusty-bui) (see there for
+          sources, tests and the full weather window).
+
+          ## Install
+
+          The widget runs the `rustybui` binary (fetching, caching and rate limiting
+          live there). Install it first — build it:
+
+          ```bash
+          git clone https://github.com/Hizoul/rusty-bui.git && cd rusty-bui && ./install.sh --no-plugins
+          ```
+
+          …or grab a prebuilt tarball from
+          [Releases](https://github.com/Hizoul/rusty-bui/releases) and unpack it into
+          `~/.local/bin`. Then:
+
+          ```bash
+          omarchy plugin add https://github.com/Hizoul/omarchy-weather-nowcast.git --enable
+          ```
+
+          Set your location: `rustybui set-location "Leiden" --lat 52.16 --lon 4.49 --country NL --timezone Europe/Amsterdam`
+
+          ## Attribution
+
+          Nowcast from KNMI radar (NL, CC BY 4.0), DWD/Bright Sky radar (DE,
+          CC BY 4.0), Open-Meteo minutely-15 fallback. GPL-3.0-or-later.
+          EOF
+          git add -A
+          if git diff --cached --quiet; then
+            echo "mirror is up to date"
+          else
+            git -c user.name="plugin-mirror bot" -c user.email="actions@users.noreply.github.com" \
+              commit -m "mirror of Hizoul/rusty-bui@${GITHUB_SHA::7}"
+            git push
+          fi
