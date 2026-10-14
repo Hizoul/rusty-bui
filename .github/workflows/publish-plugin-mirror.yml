@@ -35,10 +35,13 @@ jobs:
       - name: Stage the pill plugin
         run: |
           mkdir -p /tmp/staged/mmb.rainnowcast
-          # The pill subtree, plus the shared QML it imports.
+          # The pill subtree, plus the shared QML it imports and the preview shot.
           cp -L omarchy/manifest.json omarchy/Pill.qml omarchy/RainPanel.qml \
                 qml/Model.js qml/NowcastChart.qml LICENSE \
                 /tmp/staged/mmb.rainnowcast/
+          # The marketplace looks for one root preview.{png,jpg,webp,avif} and
+          # generates the optimized card/detail images from it.
+          cp -L assets/omarchy-nowcast.png /tmp/staged/mmb.rainnowcast/preview.png
 
       - name: Validate the staged plugin (mirrors omarchy-plugin-validate)
         run: |
