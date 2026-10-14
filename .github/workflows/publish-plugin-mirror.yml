@@ -37,7 +37,7 @@ jobs:
           mkdir -p /tmp/staged/mmb.rainnowcast
           # The pill subtree, plus the shared QML it imports.
           cp -L omarchy/manifest.json omarchy/Pill.qml omarchy/RainPanel.qml \
-                qml/Model.js qml/NowcastChart.qml \
+                qml/Model.js qml/NowcastChart.qml LICENSE \
                 /tmp/staged/mmb.rainnowcast/
 
       - name: Validate the staged plugin (mirrors omarchy-plugin-validate)
