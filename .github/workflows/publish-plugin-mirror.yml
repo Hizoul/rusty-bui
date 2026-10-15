@@ -87,11 +87,15 @@ jobs:
 
           ```bash
           mkdir -p ~/.local/bin
-          curl -fsSL -o /tmp/rustybui.tgz \
-            https://github.com/Hizoul/rusty-bui/releases/download/v0.1.0/rustybui-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
-          tar -xzf /tmp/rustybui.tgz -C ~/.local/bin && chmod +x ~/.local/bin/rustybui
+          base=https://github.com/Hizoul/rusty-bui/releases/download/v0.1.1
+          cd /tmp
+          curl -fsSLO $base/rustybui-v0.1.1-x86_64-unknown-linux-gnu.tar.gz
+          curl -fsSLO $base/SHA256SUMS
+          grep 'x86_64-unknown-linux-gnu.tar.gz' SHA256SUMS | sha256sum -c -
+          tar -xzf rustybui-v0.1.1-x86_64-unknown-linux-gnu.tar.gz -C ~/.local/bin rustybui && chmod +x ~/.local/bin/rustybui
           ```
 
+          The checksum step must print `OK` before the binary is installed.
           (aarch64: the same release ships a `-aarch64-unknown-linux-gnu` tarball.)
 
           Then:

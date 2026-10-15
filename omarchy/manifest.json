@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "mmb.rainnowcast",
   "name": "Rain nowcast",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "Matthias MB (@Hizoul)",
   "description": "Two-hour rain nowcast from KNMI/DWD radar (Open-Meteo model outside radar coverage), with a detail popout on the bar",
   "kinds": ["bar-widget"],
