@@ -76,7 +76,7 @@ raining.summary = {
   isRainingNow: true, pill: "2.4 mm/h", currentMmPerHour: 2.4, currentClass: "moderate",
   startsInMinutes: null, endsInMinutes: 55, totalMm: 3.1, peakMmPerHour: 4.0, peakInMinutes: 20
 }
-check("rain now shows the rate", Model.pillText(raining), "\ue333 2.4")
+check("rain now shows the rate with its unit", Model.pillText(raining), "\ue333 2.4 mm/h")
 check(
   "and says when it stops",
   Model.summaryLine(raining, true),
@@ -88,7 +88,7 @@ heavy.summary = {
   isRainingNow: true, pill: "12.0 mm/h", currentMmPerHour: 12, currentClass: "very-heavy",
   startsInMinutes: null, endsInMinutes: null, totalMm: 20, peakMmPerHour: 12, peakInMinutes: 0
 }
-check("heavy rain earns the emphatic glyph", Model.pillText(heavy), "\ue31d 12.0")
+check("heavy rain earns the emphatic glyph", Model.pillText(heavy), "\ue31d 12.0 mm/h")
 
 // ---- payload handling
 check("null means the location is not covered", Model.parseView("null"), { ok: false, error: "no nowcast for this location" })

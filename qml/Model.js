@@ -72,7 +72,7 @@ function pillText(view, temperatureLabel, options) {
   // Dry has no rate and no wait: the icon is what says "dry", so there is no state text.
   var state = ""
   if (hasView && showState) {
-    if (summary.isRainingNow) state = shortIntensity(summary.currentMmPerHour)
+    if (summary.isRainingNow) state = shortIntensity(summary.currentMmPerHour) + " mm/h"
     else if (isSet(summary.startsInMinutes)) state = compactMinutes(summary.startsInMinutes)
   }
 
