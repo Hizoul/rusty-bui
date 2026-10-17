@@ -55,6 +55,25 @@ Item {
       app.pressKey(Qt.Key_S, "s")
       app.pressKey(Qt.Key_Question, "?")
 
+      // The card keys: each letter, the digits in the arranged order, and a hidden card refusing.
+      var letters = ""
+      var pairs = [[Qt.Key_C, "c"], [Qt.Key_L, "l"], [Qt.Key_W, "w"], [Qt.Key_M, "m"],
+                   [Qt.Key_H, "h"], [Qt.Key_D, "d"], [Qt.Key_A, "a"]]
+      for (var i = 0; i < pairs.length; i++)
+        letters += pairs[i][1] + "=" + app.pressKey(pairs[i][0], pairs[i][1], 0) + " "
+      var digits = ""
+      for (var n = 0; n < 8; n++) digits += (n + 1) + "=" + app.pressKey(Qt.Key_1 + n, String(n + 1), 0) + " "
+      app.setCardHidden("map", true)
+      var hiddenMap = app.pressKey(Qt.Key_M, "m", 0)
+      var seventh = app.pressKey(Qt.Key_7, "7", 0)
+      var withCtrl = app.pressKey(Qt.Key_W, "w", Qt.ControlModifier)
+      console.log("harness: letters " + letters + "· digits " + digits
+        + "· hidden map m=" + hiddenMap + " · 7th after hiding one=" + seventh
+        + " · ctrl+w handled=" + withCtrl)
+      app.setCardHidden("map", false)
+      // Pressing a card key dismisses the list, like every key that acts; put it back for the image.
+      app.pressKey(Qt.Key_Question, "?")
+
       console.log("harness: day rows=" + app.dailyRows.length
         + " · blocks=" + app.scrollStops.length
         + " · ?→listed=" + listed

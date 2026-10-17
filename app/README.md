@@ -153,7 +153,9 @@ window's day card and the CLI's `day` print the same payload, so the two cannot 
 | `Alt` `↑` `↓` | move the card in view up or down |
 | `n` `p` | walk the day list — the cursor row is ringed |
 | `Enter` | open that day's hours |
-| `m` | jump to the map |
+| `c` `w` `l` | jump to the conditions, the rain nowcast, the sun and moon |
+| `m` `h` `d` `a` | jump to the map, the next 24 hours, the next 7 days, the air quality |
+| `1` – `7` | jump to the nth card showing, in the order you arranged them (hidden and empty cards are skipped) |
 | `s` | settings: location, clock, hours, units, offline, duration style, cards |
 | `r` | fetch everything again |
 | `Esc` | back out of one layer at a time: the list, then the settings, then the window |

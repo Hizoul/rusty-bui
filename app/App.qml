@@ -812,6 +812,22 @@ Item {
     return true
   }
 
+  /// Jumps to a card, flush with the top of the window. A card that is off, or has nothing to
+  /// show, is not a place to land, so the key is left unhandled rather than pretending.
+  function jumpToCard(id) {
+    var items = (root.cardItems[id] || []).filter(function(item) { return item.visible })
+    if (items.length === 0) return false
+    root.showKeys = false
+    root.reveal(items[0])
+    return true
+  }
+
+  /// The nth card showing, in the order the user arranged them: what `1`–`7` jump to.
+  function jumpToNthCard(index) {
+    var showing = root.cardOrder.filter(function(id) { return root.groupHeight(id) > 0 })
+    return index >= 0 && index < showing.length && root.jumpToCard(showing[index])
+  }
+
   function setCardHidden(id, hidden) {
     var next = root.hiddenCards.filter(function(known) { return known !== id })
     if (hidden) next.push(id)
@@ -883,6 +899,20 @@ Item {
       root.showKeys = false
       return resting !== "" && root.moveCard(resting, key === Qt.Key_Up ? -1 : 1)
     }
+    // A letter or digit that names a card goes straight to it; with Ctrl or Alt held it is
+    // somebody else's shortcut.
+    if (!(modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
+      if (key >= Qt.Key_1 && key <= Qt.Key_9) return root.jumpToNthCard(key - Qt.Key_1)
+      var named = {}
+      named[Qt.Key_C] = "now"
+      named[Qt.Key_L] = "sky"
+      named[Qt.Key_W] = "nowcast"
+      named[Qt.Key_M] = "map"
+      named[Qt.Key_H] = "hours"
+      named[Qt.Key_D] = "days"
+      named[Qt.Key_A] = "air"
+      if (named[key] !== undefined) return root.jumpToCard(named[key])
+    }
     switch (key) {
       case Qt.Key_Question:
         root.showKeys = !root.showKeys
@@ -915,10 +945,6 @@ Item {
         if (root.dayCursor < 0 || root.dayCursor >= root.dailyRows.length) return false
         root.showKeys = false
         root.openDay(root.dailyRows[root.dayCursor])
-        return true
-      case Qt.Key_M:
-        root.showKeys = false
-        root.reveal(mapCard)
         return true
       case Qt.Key_S:
         // The list is help, not a mode: anything it helps you do dismisses it.
@@ -960,7 +986,9 @@ Item {
     { keys: "Alt ↑ ↓", what: "move the card in view up or down" },
     { keys: "n p", what: "walk the day list" },
     { keys: "Enter", what: "open that day's hours" },
-    { keys: "m", what: "jump to the map" },
+    { keys: "c w l", what: "jump to conditions · rain · sun" },
+    { keys: "m h d a", what: "jump to map · hours · days · air" },
+    { keys: "1 – 7", what: "jump to the nth card, as arranged" },
     { keys: "s", what: "settings — location, clock, units, cards" },
     { keys: "r", what: "fetch everything again" },
     { keys: "Esc", what: "back out of whatever is open" }
@@ -1112,8 +1140,9 @@ Item {
 
         Card {
           anchors.centerIn: parent
-          width: Math.min(parent.width - Style.space(24), keyColumn.width + Style.space(20))
-          height: keyColumn.height + Style.space(16)
+          // The card knows its own insets; sizing it from the column alone clips the last line.
+          width: Math.min(parent.width - Style.space(24), implicitWidth)
+          height: implicitHeight
 
           Column {
             id: keyColumn
