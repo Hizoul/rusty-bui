@@ -36,7 +36,7 @@ and one round of cache-aware requests:
   the moon: its phase drawn as a disc, not looked up in a font, with the lit fraction beside it.
   The sun's times are the provider's where it has them and computed where it does not (every
   DWD day); the moon is always computed.
-- **Rain nowcast** — the same `NowcastChart.qml` the bar popout draws: one bar per radar
+- **Rain nowcast** — the same `NowcastPanel.qml` (chart, hover detail, status) the bar popout embeds: one bar per radar
   frame, hour ticks, a now marker, mm/h axis, plus the sentence and the status line.
 - **Rain map** — DWD's radar composite over a vendored coastline, drag to move it, wheel to
   zoom, and a stepper that walks the frames from an hour back to the end of the nowcast. The map
@@ -68,12 +68,23 @@ stored by the binary, in the same file the CLI reads and writes:
 ```bash
 rustybui prefs                  # read them
 rustybui prefs --clock 12h      # …or change one
+rustybui prefs --duration words # how minutes are written: colon (1:31h), words (1 h 31 min), compact (1h31)
+rustybui prefs --card-order air,now --hidden-cards map   # the cards, top to bottom, and the ones off
+rustybui prefs --reset-layout   # the shipped order, everything shown
 rustybui prefs --json           # what a front-end reads, including which ones are set
 ```
 
 They can equally be changed from inside the window (the **Settings** affordance in the
 masthead, or `s`), which is the point: searching for a place, storing it and switching the clock all
 go through `set-location` and `prefs`, so the window and the command line can never disagree.
+The **Time** button cycles how minutes are written everywhere — the pill, the popout, this window
+and the CLI: `1:31h` (colon, the default), `1 h 31 min` (words) or `1h31` (compact). Rust writes
+the nowcast's labels and the payload carries them; the one client-side twin is `formatDuration`
+in `Model.js` (for the map's frame ages), held to the same test vectors.
+The **Cards** chips show or hide a card, and the cards themselves move: drag the grip (⠿) in a
+card's corner, or press `Alt+↑/↓` on the card in view. The order is stored with the other
+preferences, so the CLI and the window agree. The settings, warnings and footer stay put, and an
+opened day stays attached to the days card.
 The **Pill** row in the same card edits the bar widget's own display settings (`showIcon`,
 `showState`, `showTemperature`, `iconSide`); those live in Omarchy's settings rather than the
 binary's file, so the row writes them through `omarchy bar set` and the pill updates live.
@@ -139,10 +150,11 @@ window's day card and the CLI's `day` print the same payload, so the two cannot 
 | `?` | the list itself |
 | `/` | open the settings and search for a place |
 | `↑` `↓` (`k` `j`) | scroll block by block — the next card's top lands flush with the window's |
+| `Alt` `↑` `↓` | move the card in view up or down |
 | `n` `p` | walk the day list — the cursor row is ringed |
 | `Enter` | open that day's hours |
 | `m` | jump to the map |
-| `s` | settings: location, clock, hours, units, offline |
+| `s` | settings: location, clock, hours, units, offline, duration style, cards |
 | `r` | fetch everything again |
 | `Esc` | back out of one layer at a time: the list, then the settings, then the window |
 

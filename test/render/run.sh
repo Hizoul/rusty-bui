@@ -92,8 +92,15 @@ case "$case_name" in
     app_fixture=app-leiden.json
     drivers="AppKeys:"
     ;;
+  layout)
+    # The cards moved by key, by drag and by the chips, then the layout a stored preference
+    # produces. Only calls can show it, so this case's driver makes them.
+    bar_fixture=bar-dry.json
+    app_fixture=app-leiden.json
+    drivers="AppLayout:"
+    ;;
   *)
-    echo "unknown case: $case_name (expected dry, wet, alerts, daylight, day, keys or map)" >&2
+    echo "unknown case: $case_name (expected dry, wet, alerts, daylight, day, keys, layout or map)" >&2
     exit 2
     ;;
 esac
@@ -134,7 +141,7 @@ PY
   # `rustybui prefs --json` and `rustybui search … --json`, captured from live runs. One place
   # is saved (Berlin, which is *not* the stored one) so the settings card renders both halves of
   # the places row: a chip to switch to, and a chip to save the place currently shown.
-  printf 'var prefs = {"clock24":true,"hours":24,"offline":false,"units":"metric","stored":{"clock":false,"hours":false,"offline":false,"units":false},"location":{"name":"Leiden","latitude":52.16,"longitude":4.49,"country_code":"NL","timezone":"Europe/Amsterdam"},"places":[{"name":"Berlin","latitude":52.52,"longitude":13.405,"country_code":"DE","timezone":"Europe/Berlin"}],"placeLimit":12}\n'
+  printf 'var prefs = {"clock24":true,"hours":24,"offline":false,"units":"metric","durationStyle":"colon","cardOrder":["now","sky","nowcast","map","hours","days","air"],"hiddenCards":[],"stored":{"clock":false,"hours":false,"offline":false,"units":false,"duration":false,"cards":false},"location":{"name":"Leiden","latitude":52.16,"longitude":4.49,"country_code":"NL","timezone":"Europe/Amsterdam"},"places":[{"name":"Berlin","latitude":52.52,"longitude":13.405,"country_code":"DE","timezone":"Europe/Berlin"}],"placeLimit":12}\n'
   printf '\nvar search = [{"name":"Leiden, South Holland","latitude":52.15833,"longitude":4.49306,"country_code":"NL","timezone":"Europe/Amsterdam"},{"name":"Leidenborn, Rhineland-Palatinate","latitude":50.13333,"longitude":6.21667,"country_code":"DE","timezone":"Europe/Berlin"}]\n'
 } >"$work/Quickshell/Io/Fixture.js"
 

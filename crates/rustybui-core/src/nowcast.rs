@@ -237,13 +237,13 @@ pub struct NowcastSummary {
 }
 
 impl NowcastSummary {
-    /// Short pill text, e.g. `0.40 mm/h`, `in 25 min`, `dry`. The rate carries its unit and its
+    /// Short pill text, e.g. `0.40 mm/h`, `in 25m`, `dry`. The rate carries its unit and its
     /// conversion together, so an imperial reader is not shown millimetres in a hat.
-    pub fn pill_text(&self, imperial: bool) -> String {
+    pub fn pill_text(&self, imperial: bool, style: DurationStyle) -> String {
         if self.is_raining_now {
             crate::units::format_rate(self.current_mm_per_hour, imperial)
         } else if let Some(minutes) = self.starts_in_minutes {
-            format!("in {}", format_minutes(minutes))
+            format!("in {}", format_minutes(minutes, style))
         } else {
             "dry".to_string()
         }
@@ -259,13 +259,47 @@ pub fn format_intensity(mm_per_hour: f64) -> String {
     }
 }
 
-/// `45 min` / `1 h 05` / `2 h 00`.
-pub fn format_minutes(minutes: i64) -> String {
+/// How a span of minutes is written: the one setting behind every "in 25m" and "1:31h" the
+/// pill, the popout, the window and the CLI show. One style, one format, everywhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DurationStyle {
+    /// `25m`, `1:31h` — the continental way of writing a time span.
+    #[default]
+    Colon,
+    /// `25 min`, `1 h 31 min`.
+    Words,
+    /// `25m`, `1h31`.
+    Compact,
+}
+
+impl DurationStyle {
+    pub const ALL: [DurationStyle; 3] = [Self::Colon, Self::Words, Self::Compact];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Colon => "colon",
+            Self::Words => "words",
+            Self::Compact => "compact",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|style| style.as_str().eq_ignore_ascii_case(text.trim()))
+    }
+}
+
+/// `25m` / `1:05h` (colon), `25 min` / `1 h 05 min` (words), `25m` / `1h05` (compact).
+pub fn format_minutes(minutes: i64, style: DurationStyle) -> String {
     let minutes = minutes.max(0);
-    if minutes < 60 {
-        format!("{minutes} min")
-    } else {
-        format!("{} h {:02}", minutes / 60, minutes % 60)
+    let (hours, rest) = (minutes / 60, minutes % 60);
+    match style {
+        DurationStyle::Colon if hours == 0 => format!("{rest}m"),
+        DurationStyle::Colon => format!("{hours}:{rest:02}h"),
+        DurationStyle::Words if hours == 0 => format!("{rest} min"),
+        DurationStyle::Words => format!("{hours} h {rest:02} min"),
+        DurationStyle::Compact if hours == 0 => format!("{rest}m"),
+        DurationStyle::Compact => format!("{hours}h{rest:02}"),
     }
 }
 
@@ -324,7 +358,7 @@ mod tests {
         assert!(!summary.is_raining_now);
         assert_eq!(summary.starts_in_minutes, Some(8)); // rain starts at +10
         assert_eq!(summary.ends_in_minutes, Some(13));
-        assert_eq!(summary.pill_text(false), "in 8 min");
+        assert_eq!(summary.pill_text(false, DurationStyle::Words), "in 8 min");
     }
 
     #[test]
@@ -334,7 +368,7 @@ mod tests {
         assert!(!summary.is_raining_now);
         assert_eq!(summary.starts_in_minutes, None);
         assert_eq!(summary.ends_in_minutes, None);
-        assert_eq!(summary.pill_text(false), "dry");
+        assert_eq!(summary.pill_text(false, DurationStyle::Colon), "dry");
     }
 
     #[test]
@@ -352,8 +386,16 @@ mod tests {
     fn formatting_matches_upstream() {
         assert_eq!(format_intensity(0.4), "0.40");
         assert_eq!(format_intensity(2.44), "2.4");
-        assert_eq!(format_minutes(45), "45 min");
-        assert_eq!(format_minutes(65), "1 h 05");
+        use DurationStyle::*;
+        assert_eq!(format_minutes(25, Colon), "25m");
+        assert_eq!(format_minutes(91, Colon), "1:31h");
+        assert_eq!(format_minutes(120, Colon), "2:00h");
+        assert_eq!(format_minutes(45, Words), "45 min");
+        assert_eq!(format_minutes(91, Words), "1 h 31 min");
+        assert_eq!(format_minutes(65, Compact), "1h05");
+        assert_eq!(format_minutes(25, Compact), "25m");
+        assert_eq!(DurationStyle::parse(" Words "), Some(Words));
+        assert_eq!(DurationStyle::parse("nope"), None);
         assert_eq!(format_millimeters(1.0, false), "1.00 mm");
         assert_eq!(format_millimeters(25.4, true), "1.000 in");
     }

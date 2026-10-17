@@ -11,7 +11,7 @@ Pill.qml          the pill; the shell routes open/close/toggle through it
 RainPanel.qml     the popout: chart, summary, provenance
 ```
 
-`Model.js` and `NowcastChart.qml` come from the repo's `qml/` directory and are copied in
+`Model.js`, `NowcastChart.qml` and `NowcastPanel.qml` come from the repo's `qml/` directory and are copied in
 when the plugin is staged — the window plugin under `app/` uses the same two files.
 
 The entry points are not called `BarWidget.qml`/`Panel.qml` on purpose: a component file

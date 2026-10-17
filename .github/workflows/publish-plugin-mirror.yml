@@ -5,7 +5,7 @@
 # Hizoul/omarchy-weather-nowcast — holds exactly one plugin at its root:
 #
 #   manifest.json   (copy of omarchy/manifest.json)
-#   Pill.qml, RainPanel.qml, Model.js, NowcastChart.qml
+#   Pill.qml, RainPanel.qml, Model.js, NowcastChart.qml, NowcastPanel.qml
 #   README.md       (install instructions, binary requirement)
 #
 # Setup, once:
@@ -37,7 +37,7 @@ jobs:
           mkdir -p /tmp/staged/mmb.rainnowcast
           # The pill subtree, plus the shared QML it imports and the preview shot.
           cp -L omarchy/manifest.json omarchy/Pill.qml omarchy/RainPanel.qml \
-                qml/Model.js qml/NowcastChart.qml LICENSE \
+                qml/Model.js qml/NowcastChart.qml qml/NowcastPanel.qml LICENSE \
                 /tmp/staged/mmb.rainnowcast/
           # The marketplace looks for one root preview.{png,jpg,webp,avif} and
           # generates the optimized card/detail images from it.

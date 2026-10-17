@@ -6,7 +6,7 @@
 
 use crate::location::Location;
 use crate::nowcast::{
-    format_intensity, format_minutes, IntensityClass, NowcastProvider, RainNowcast,
+    format_intensity, format_minutes, DurationStyle, IntensityClass, NowcastProvider, RainNowcast,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -63,7 +63,7 @@ impl From<NowcastProvider> for ProviderView {
 #[serde(rename_all = "camelCase")]
 pub struct SummaryView {
     pub is_raining_now: bool,
-    /// Short pill text: `0.40 mm/h`, `in 25 min` or `dry`.
+    /// Short pill text: `0.40 mm/h`, `in 25m` or `dry`.
     pub pill: String,
     pub current_mm_per_hour: f64,
     pub current_class: IntensityClass,
@@ -76,6 +76,8 @@ pub struct SummaryView {
     pub peak_mm_per_hour: f64,
     pub peak_in_minutes: Option<i64>,
     pub peak_in_label: Option<String>,
+    /// How long the rain lasts once it starts, when it starts and stops inside the window.
+    pub lasts_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +116,7 @@ impl NowcastView {
         nowcast: &RainNowcast,
         now: DateTime<Utc>,
         imperial: bool,
+        style: DurationStyle,
     ) -> Self {
         let summary = nowcast.summary(now);
         let current_time = nowcast.point_at(now).map(|point| point.time);
@@ -142,18 +145,24 @@ impl NowcastView {
             now_ms: now.timestamp_millis(),
             summary: SummaryView {
                 is_raining_now: summary.is_raining_now,
-                pill: summary.pill_text(imperial),
+                pill: summary.pill_text(imperial, style),
                 current_mm_per_hour: summary.current_mm_per_hour,
                 current_class: summary.current_class,
                 current_label: summary.current_class.label().to_string(),
                 starts_in_minutes: summary.starts_in_minutes,
-                starts_in_label: summary.starts_in_minutes.map(format_minutes),
+                starts_in_label: summary.starts_in_minutes.map(|minutes| format_minutes(minutes, style)),
                 ends_in_minutes: summary.ends_in_minutes,
-                ends_in_label: summary.ends_in_minutes.map(format_minutes),
+                ends_in_label: summary.ends_in_minutes.map(|minutes| format_minutes(minutes, style)),
                 total_mm: summary.total_millimeters,
                 peak_mm_per_hour: summary.peak_mm_per_hour,
                 peak_in_minutes: summary.peak_in_minutes,
-                peak_in_label: summary.peak_in_minutes.map(format_minutes),
+                peak_in_label: summary.peak_in_minutes.map(|minutes| format_minutes(minutes, style)),
+                lasts_label: match (summary.starts_in_minutes, summary.ends_in_minutes) {
+                    (Some(start), Some(end)) if end > start => {
+                        Some(format_minutes(end - start, style))
+                    }
+                    _ => None,
+                },
             },
             points,
         }
@@ -218,7 +227,7 @@ mod tests {
             NowcastProvider::Knmi,
             true,
         );
-        NowcastView::new(&Location::new("Leiden", 52.16, 4.49), &nowcast, now, false)
+        NowcastView::new(&Location::new("Leiden", 52.16, 4.49), &nowcast, now, false, DurationStyle::Words)
     }
 
     #[test]

@@ -58,13 +58,24 @@ check("the status line reports the source resolution", /5-min steps/.test(Model.
 // ---- hand-built views for the states the live feed did not show
 const base = JSON.parse(payload)
 base.summary = {
-  isRainingNow: false, pill: "in 25 min", currentMmPerHour: 0, currentClass: "dry",
-  startsInMinutes: 25, endsInMinutes: 65, totalMm: 1.85, peakMmPerHour: 1.2, peakInMinutes: 40
+  isRainingNow: false, pill: "in 25m", currentMmPerHour: 0, currentClass: "dry",
+  startsInMinutes: 25, startsInLabel: "25m", endsInMinutes: 65, endsInLabel: "1:05h", lastsLabel: "40m", totalMm: 1.85, peakMmPerHour: 1.2, peakInMinutes: 40
 }
 const soon = { ok: true, view: base }
 check("rain on the way shows the wait", Model.pillText(base), "\ue318 25m")
-check("minutes under an hour are minutes", Model.compactMinutes(25), "25m")
-check("and hours plus padded minutes above", Model.compactMinutes(65), "1h05")
+// The same vectors as format_minutes in crates/rustybui-core/src/nowcast.rs
+check("colon: minutes under an hour are minutes", Model.formatDuration(25, "colon"), "25m")
+check("colon: hours plus padded minutes above", Model.formatDuration(65, "colon"), "1:05h")
+check("colon: 91 minutes reads 1:31h", Model.formatDuration(91, "colon"), "1:31h")
+check("colon: a whole hour keeps its zeros", Model.formatDuration(120, "colon"), "2:00h")
+check("words: minutes", Model.formatDuration(45, "words"), "45 min")
+check("words: hours and minutes", Model.formatDuration(91, "words"), "1 h 31 min")
+check("compact: minutes", Model.formatDuration(25, "compact"), "25m")
+check("compact: hours and minutes", Model.formatDuration(65, "compact"), "1h05")
+check("an unknown style is the default style", Model.formatDuration(91, "nonsense"), "1:31h")
+check("the payload's own label wins over the twin", Model.pillText(Object.assign({}, base, {
+  summary: Object.assign({}, base.summary, { startsInLabel: "25 min" })
+})), "\ue318 25 min")
 check(
   "the summary reads like a sentence",
   Model.summaryLine(base, true),
@@ -74,7 +85,7 @@ check(
 const raining = JSON.parse(payload)
 raining.summary = {
   isRainingNow: true, pill: "2.4 mm/h", currentMmPerHour: 2.4, currentClass: "moderate",
-  startsInMinutes: null, endsInMinutes: 55, totalMm: 3.1, peakMmPerHour: 4.0, peakInMinutes: 20
+  startsInMinutes: null, endsInMinutes: 55, endsInLabel: "55m", totalMm: 3.1, peakMmPerHour: 4.0, peakInMinutes: 20
 }
 check("rain now shows the rate with its unit", Model.pillText(raining), "\ue333 2.4 mm/h")
 check(
@@ -350,13 +361,14 @@ check("with every band in exactly one column",
   Model.RAMP.length)
 
 const now = 1791741600000 // 2026-10-11T18:00:00Z
-check("a frame in the future is ahead of us", Model.frameAge(now + 20 * 60000, now), "in 20 min")
-check("a frame in the past was ago", Model.frameAge(now - 35 * 60000, now), "35 min ago")
+check("a frame in the future is ahead of us", Model.frameAge(now + 20 * 60000, now), "in 20m")
+check("a frame in the past was ago", Model.frameAge(now - 35 * 60000, now), "35m ago")
 check("the frame on screen is now", Model.frameAge(now, now), "now")
 check("half a minute rounds to now rather than to nothing", Model.frameAge(now + 25000, now), "now")
 check("an hour of nowcast reads as hours and minutes",
   [Model.frameAge(now + 65 * 60000, now), Model.frameAge(now - 125 * 60000, now)],
-  ["in 1 h 05", "2 h 05 ago"])
+  ["in 1:05h", "2:05h ago"])
+check("and the style is the user's", Model.frameAge(now + 65 * 60000, now, "words"), "in 1 h 05 min")
 check("and a frame with no time says nothing", Model.frameAge(null, now), "")
 
 // ---- the loop, and what the label is allowed to claim

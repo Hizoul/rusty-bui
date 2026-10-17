@@ -72,7 +72,7 @@ rustybui alerts                  # warnings in force, worst first
 rustybui radar --json            # DWD's radar composite as a georeferenced PNG, for the map
 rustybui air
 rustybui search Amersfoort
-rustybui prefs                   # read or change what the window shows: clock, hours, offline, units
+rustybui prefs                   # read or change what the window shows: clock, hours, offline, units, duration style, card order
 rustybui places [--add] [--use <name>] [--remove <name>]   # the places you switch between
 rustybui cache [--clear]         # report or clear the caches
 ```
@@ -84,7 +84,7 @@ Global flags: `--refresh` (ignore the per-cycle nowcast cache), `--offline` (nev
 ```
 crates/rustybui-core   domain types, providers, caches, the view contracts QML renders
 crates/rustybui-cli    `rustybui` binary: nowcast / forecast / app / air / search / bar / cache
-qml/                   QML shared by both plugins: Model.js, NowcastChart.qml, Card.qml
+qml/                   QML shared by both plugins: Model.js, NowcastChart.qml, NowcastPanel.qml, Card.qml
 omarchy/               bar plugin: Pill.qml (the pill) + RainPanel.qml (the popout)
 app/                   window plugin: App.qml
 test/                  node checks of Model.js against captured payloads

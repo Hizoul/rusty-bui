@@ -82,6 +82,31 @@ Item {
   // already in them, so this only decides what the toggle says.
   readonly property bool imperial: root.prefs !== null && String(root.prefs.units) === "imperial"
   readonly property string unitsLabel: root.imperial ? "Imperial" : "Metric"
+  // How a span of minutes is written, the stored preference: the payload's labels already are
+  // in it, so this only decides what the toggle says and how the map's frame ages read.
+  readonly property string durationStyle: root.prefs && root.prefs.durationStyle
+    ? String(root.prefs.durationStyle) : "colon"
+  readonly property var durationLabels: ({ colon: "1:31h", words: "1 h 31 min", compact: "1h31" })
+  readonly property var nextDurationStyle: ({ colon: "words", words: "compact", compact: "colon" })
+
+  // ---- the cards: their order, and which are switched off --------------------
+  // The binary stores both (the same file the CLI reads). `layoutOrder` and `layoutHidden` hold
+  // a change from the moment it is made until the binary has written it down, so a card does not
+  // snap back for the length of a process.
+  readonly property var defaultCards: ["now", "sky", "nowcast", "map", "hours", "days", "air"]
+  readonly property var cardLabels: ({
+    now: "Now", sky: "Sky", nowcast: "Nowcast", map: "Map", hours: "Hours", days: "Days", air: "Air"
+  })
+  property var layoutOrder: null
+  property var layoutHidden: null
+  readonly property var cardOrder: root.layoutOrder
+    || (root.prefs && root.prefs.cardOrder ? root.prefs.cardOrder : root.defaultCards)
+  readonly property var hiddenCards: root.layoutHidden
+    || (root.prefs && root.prefs.hiddenCards ? root.prefs.hiddenCards : [])
+
+  function cardShown(id) {
+    return root.hiddenCards.indexOf(id) < 0
+  }
 
   // ---- the window's own settings, which the binary stores -------------------
   property var prefs: null
@@ -388,6 +413,8 @@ Item {
   readonly property var savePrefsCommandLine: {
     var change = root.pendingPrefs
     if (!change) return []
+    // A change with no value is a bare flag (`--reset-layout`).
+    if (change.value === null) return [root.binaryPath, "prefs", "--" + change.name, "--json"]
     return [root.binaryPath, "prefs", "--" + change.name, String(change.value), "--json"]
   }
 
@@ -407,22 +434,47 @@ Item {
     }
 
     onExited: function(exitCode) {
+      var finished = root.pendingPrefs
       root.pendingPrefs = null
       if (exitCode !== 0) {
         root.searchHint = "could not store that preference"
+        root.prefQueue = []
+        root.layoutOrder = null
+        root.layoutHidden = null
         return
       }
-      // Clock, hours and units all change the labels the payload carries, so a preference is
-      // only really applied once the window has asked for a new payload.
+      if (root.prefQueue.length > 0) {
+        // Deferred: the process is only finished once this handler has returned.
+        Qt.callLater(root.pumpPrefs)
+        return
+      }
+      // The binary has written the layout down and answered with it; the local copy can go.
+      root.layoutOrder = null
+      root.layoutHidden = null
+      // Clock, hours, units and the duration style all change the labels the payload carries, so
+      // a preference is only really applied once the window has asked for a new payload. Moving
+      // a card changes nothing the payload says.
+      if (finished && finished.quiet) return
       root.loadPrefs()
       root.refresh()
     }
   }
 
-  function setPref(name, value) {
-    root.pendingPrefs = { name: name, value: value }
+  // Changes wait their turn: two quick ones (a card moved, then another hidden) must both reach
+  // the binary rather than the second replacing the first.
+  property var prefQueue: []
+
+  function setPref(name, value, quiet) {
+    root.prefQueue = root.prefQueue.concat([{ name: name, value: value, quiet: quiet === true }])
+    root.pumpPrefs()
+  }
+
+  function pumpPrefs() {
+    if (savePrefsProc.running || root.prefQueue.length === 0) return
+    root.pendingPrefs = root.prefQueue[0]
+    root.prefQueue = root.prefQueue.slice(1)
     Qt.callLater(function() {
-      if (!savePrefsProc.running) savePrefsProc.running = true
+      if (!savePrefsProc.running && root.pendingPrefs) savePrefsProc.running = true
     })
   }
 
@@ -548,7 +600,7 @@ Item {
   /// window, and a detail nobody can see is a detail nobody asked for.
   function reveal(item) {
     if (!scroller || !item) return
-    var wanted = item.y - Style.space(8)
+    var wanted = root.contentTop(item) - Style.space(8)
     scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, wanted))
   }
 
@@ -628,16 +680,161 @@ Item {
   // affordance are page furniture, not stops: only the cards the window is about. And only
   // what is on screen — a hidden card is not a place to land — so the list is a binding, and
   // opening the settings or a day inserts that card as a stop for as long as it is there.
-  readonly property var scrollStops: [
-    settingsCard, warnings,
-    nowCard, skyCard, nowcastCard, mapCard,
-    hoursCard, daysCard, dayCard, airCard, footer
-  ].filter(function(item) { return item && item.visible })
+  readonly property var scrollStops: {
+    var stops = [settingsCard, warnings]
+    for (var i = 0; i < root.cardOrder.length; i++)
+      stops = stops.concat(root.cardItems[root.cardOrder[i]] || [])
+    stops.push(footer)
+    return stops.filter(function(item) { return item && item.visible })
+  }
+
+  // ---- the card stack ---------------------------------------------------------
+  // Each id stands for one card, or for the days card with the opened day attached to it.
+  readonly property var cardItems: ({
+    now: [nowCard], sky: [skyCard], nowcast: [nowcastCard], map: [mapCard],
+    hours: [hoursCard], days: [daysCard, dayCard], air: [airCard]
+  })
+  readonly property real stackGap: Style.spacing.panelGap
+
+  property string dragId: ""
+  property real dragTop: 0
+  property real dragGrab: 0
+
+  /// How tall a card's group is as it stands: the cards showing, and the gaps between them.
+  function groupHeight(id) {
+    var total = 0
+    var items = root.cardItems[id] || []
+    for (var i = 0; i < items.length; i++) {
+      if (!items[i].visible) continue
+      total += (total > 0 ? root.stackGap : 0) + items[i].height
+    }
+    return total
+  }
+
+  /// Where `item` sits in the stack: below everything that comes before it in the order and is
+  /// showing. The card being dragged follows the pointer instead of its place in the order.
+  function stackY(item) {
+    var order = root.cardOrder
+    var y = 0
+    for (var i = 0; i < order.length; i++) {
+      var items = root.cardItems[order[i]] || []
+      var groupStart = y
+      for (var j = 0; j < items.length; j++) {
+        if (items[j] === item) {
+          var shift = root.dragId === order[i] ? root.dragTop - groupStart : 0
+          return y + shift
+        }
+        if (items[j].visible) y += items[j].height + root.stackGap
+      }
+    }
+    return y
+  }
+
+  function stackHeight() {
+    var order = root.cardOrder
+    var total = 0
+    for (var i = 0; i < order.length; i++) {
+      var height = root.groupHeight(order[i])
+      if (height > 0) total += height + root.stackGap
+    }
+    return Math.max(0, total - root.stackGap)
+  }
+
+  function beginDrag(id, pointerY) {
+    var start = 0
+    var order = root.cardOrder
+    for (var i = 0; i < order.length && order[i] !== id; i++) {
+      var height = root.groupHeight(order[i])
+      if (height > 0) start += height + root.stackGap
+    }
+    root.dragGrab = pointerY - start
+    root.dragTop = start
+    root.dragId = id
+    root.showKeys = false
+  }
+
+  function dragTo(pointerY) {
+    if (root.dragId === "") return
+    var own = root.groupHeight(root.dragId)
+    root.dragTop = Math.max(0, Math.min(root.stackHeight() - own, pointerY - root.dragGrab))
+
+    // The slot is wherever the dragged card's middle falls among the others' middles.
+    var others = root.cardOrder.filter(function(id) { return id !== root.dragId })
+    var middle = root.dragTop + own / 2
+    var at = others.length
+    var cursor = 0
+    for (var i = 0; i < others.length; i++) {
+      var height = root.groupHeight(others[i])
+      if (height === 0) continue
+      if (middle < cursor + height / 2) { at = i; break }
+      cursor += height + root.stackGap
+    }
+    var next = others.slice(0, at).concat([root.dragId], others.slice(at))
+    if (next.join(",") !== root.cardOrder.join(",")) root.layoutOrder = next
+  }
+
+  function endDrag() {
+    if (root.dragId === "") return
+    root.dragId = ""
+    root.saveOrder()
+  }
+
+  function saveOrder() {
+    root.setPref("card-order", root.cardOrder.join(","), true)
+  }
+
+  /// The card the view is resting on: the first showing card whose bottom is below the top
+  /// of the window.
+  function currentCard() {
+    var order = root.cardOrder
+    for (var i = 0; i < order.length; i++) {
+      var items = (root.cardItems[order[i]] || []).filter(function(item) { return item.visible })
+      if (items.length === 0) continue
+      var last = items[items.length - 1]
+      if (root.contentTop(last) + last.height > scroller.contentY + Style.space(8)) return order[i]
+    }
+    return ""
+  }
+
+  /// Moves a card one place up or down among the ones showing, and keeps it in view.
+  function moveCard(id, direction) {
+    var order = root.cardOrder.slice()
+    var from = order.indexOf(id)
+    if (from < 0) return false
+    var to = from + direction
+    while (to >= 0 && to < order.length && root.groupHeight(order[to]) === 0) to += direction
+    if (to < 0 || to >= order.length) return true
+    order.splice(from, 1)
+    order.splice(to, 0, id)
+    root.layoutOrder = order
+    root.saveOrder()
+    Qt.callLater(function() { root.scrollToStop(root.cardItems[id][0]) })
+    return true
+  }
+
+  function setCardHidden(id, hidden) {
+    var next = root.hiddenCards.filter(function(known) { return known !== id })
+    if (hidden) next.push(id)
+    root.layoutHidden = next
+    root.setPref("hidden-cards", next.join(","), true)
+  }
+
+  function resetLayout() {
+    root.layoutOrder = root.defaultCards.slice()
+    root.layoutHidden = []
+    root.setPref("reset-layout", null, true)
+  }
+
+  /// Where the top of `item` sits in the scrolled content. The cards live inside the stack, so
+  /// their own `y` is only a position within it.
+  function contentTop(item) {
+    return item.mapToItem(column, 0, 0).y
+  }
 
   /// Where the top of `item` sits in the scrolled content, clamped to what can be scrolled to.
   function stopOffset(item) {
     var furthest = Math.max(0, scroller.contentHeight - scroller.height)
-    return Math.max(0, Math.min(furthest, item.y))
+    return Math.max(0, Math.min(furthest, root.contentTop(item)))
   }
 
   /// Puts one block's top flush with the top of the window, so every step lands the same way.
@@ -678,8 +875,14 @@ Item {
     return true
   }
 
-  function pressKey(key, text) {
+  function pressKey(key, text, modifiers) {
     var character = String(text === undefined || text === null ? "" : text).toLowerCase()
+    // Alt with an arrow carries the card the view is resting on up or down the page.
+    if ((modifiers & Qt.AltModifier) && (key === Qt.Key_Up || key === Qt.Key_Down)) {
+      var resting = root.currentCard()
+      root.showKeys = false
+      return resting !== "" && root.moveCard(resting, key === Qt.Key_Up ? -1 : 1)
+    }
     switch (key) {
       case Qt.Key_Question:
         root.showKeys = !root.showKeys
@@ -754,10 +957,11 @@ Item {
     { keys: "?", what: "this list" },
     { keys: "/", what: "search for a place" },
     { keys: "↑ ↓ · j k", what: "scroll block by block" },
+    { keys: "Alt ↑ ↓", what: "move the card in view up or down" },
     { keys: "n p", what: "walk the day list" },
     { keys: "Enter", what: "open that day's hours" },
     { keys: "m", what: "jump to the map" },
-    { keys: "s", what: "settings — location, clock, units" },
+    { keys: "s", what: "settings — location, clock, units, cards" },
     { keys: "r", what: "fetch everything again" },
     { keys: "Esc", what: "back out of whatever is open" }
   ]
@@ -884,7 +1088,7 @@ Item {
       }
 
       Keys.onPressed: function(event) {
-        event.accepted = root.pressKey(event.key, event.text)
+        event.accepted = root.pressKey(event.key, event.text, event.modifiers)
       }
 
       // ---- the key list ---------------------------------------------------
@@ -1374,6 +1578,118 @@ Item {
                 }
               }
 
+              Row {
+                width: parent.width
+                spacing: Style.space(6)
+
+                // One button, three styles: it shows the one in force, and a press moves on to
+                // the next.
+                Rectangle {
+                  width: (parent.width - Style.space(18)) / 4
+                  height: Style.space(30)
+                  radius: Style.cornerRadius
+                  color: Model.withAlpha(root.foreground, durationRow.containsMouse ? 0.12 : 0.06)
+                  border.width: 1
+                  border.color: Model.withAlpha(root.foreground, 0.18)
+
+                  Text {
+                    anchors.centerIn: parent
+                    text: "Time " + (root.durationLabels[root.durationStyle] || root.durationLabels.colon)
+                    color: root.foreground
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+
+                  MouseArea {
+                    id: durationRow
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.setPref("duration", root.nextDurationStyle[root.durationStyle] || "words")
+                  }
+                }
+              }
+
+              Item {
+                width: parent.width
+                height: cardsTitle.implicitHeight
+
+                Text {
+                  id: cardsTitle
+                  anchors.left: parent.left
+                  text: "Cards"
+                  color: root.foreground
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.subtitle
+                }
+
+                Text {
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "reset order"
+                  color: root.muted(resetArea.containsMouse ? 0.9 : 0.6)
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+
+                  MouseArea {
+                    id: resetArea
+                    anchors.fill: parent
+                    anchors.margins: -Style.space(4)
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.resetLayout()
+                  }
+                }
+              }
+
+              Flow {
+                width: parent.width
+                spacing: Style.space(6)
+
+                // In the order they are shown. A struck-through chip is a card that is off.
+                Repeater {
+                  model: root.cardOrder
+
+                  delegate: Rectangle {
+                    readonly property bool shown: root.cardShown(modelData)
+                    width: chipLabel.implicitWidth + Style.space(20)
+                    height: Style.space(26)
+                    radius: Style.cornerRadius
+                    color: Model.withAlpha(root.foreground, shown ? (chipArea.containsMouse ? 0.16 : 0.1) : 0.03)
+                    border.width: 1
+                    border.color: Model.withAlpha(root.foreground, shown ? 0.3 : 0.12)
+
+                    Text {
+                      id: chipLabel
+                      anchors.centerIn: parent
+                      text: root.cardLabels[modelData] || modelData
+                      color: root.foreground
+                      opacity: parent.shown ? 1 : 0.45
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.strikeout: !parent.shown
+                    }
+
+                    MouseArea {
+                      id: chipArea
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: root.setCardHidden(modelData, parent.shown)
+                    }
+                  }
+                }
+              }
+
+              Text {
+                width: parent.width
+                text: "Drag a card's grip (⠿) or press Alt+↑/↓ to move it; tap a chip to show or hide a card."
+                wrapMode: Text.WordWrap
+                color: root.muted(0.4)
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+              }
+
               Text {
                 text: "Pill"
                 color: root.foreground
@@ -1561,587 +1877,635 @@ Item {
             }
           }
 
-          // ---- now ------------------------------------------------------------
-          Card {
-            id: nowCard
+          // ---- the cards -------------------------------------------------------
+          // A stack rather than a Column, because the order is the user's: each card sits at a
+          // y computed from where its id comes in `cardOrder`, so moving one is a change to a
+          // list, not a re-creation of the card (the map would reload its picture). The grips
+          // at the end are what drags them.
+          Item {
+            id: cardStack
             width: parent.width
-            visible: root.current !== null
+            height: root.stackHeight()
 
-            Column {
+            // ---- now ------------------------------------------------------------
+            Card {
+              id: nowCard
               width: parent.width
-              spacing: Style.space(10)
+              y: root.stackY(nowCard)
+              visible: root.cardShown("now") && root.current !== null
 
-              Item {
+              Column {
                 width: parent.width
-                height: Math.max(heroGlyph.implicitHeight, heroColumn.implicitHeight)
+                spacing: Style.space(10)
 
-                Text {
-                  id: heroGlyph
-                  anchors.left: parent.left
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: root.heroGlyph
-                  color: root.accent
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.displayLarge
-                }
-
-                Column {
-                  id: heroColumn
-                  anchors.left: heroGlyph.right
-                  anchors.leftMargin: Style.space(14)
-                  anchors.verticalCenter: parent.verticalCenter
-                  spacing: Style.space(2)
-
-                  Text {
-                    text: root.current ? (root.current.temperatureLabel || "—") : "—"
-                    color: root.foreground
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.display
-                  }
-
-                  Text {
-                    text: root.current
-                      ? [root.current.conditionLabel, root.current.feelsLikeLabel].filter(function(part) { return !!part }).join(" · ")
-                      : ""
-                    color: root.muted(0.75)
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.subtitle
-                  }
-                }
-              }
-
-              Grid {
-                width: parent.width
-                columns: 3
-                columnSpacing: Style.space(12)
-                rowSpacing: Style.space(8)
-
-                Repeater {
-                  model: root.stats
-
-                  delegate: Column {
-                    width: (parent.width - Style.space(24)) / 3
-                    spacing: Style.space(1)
-
-                    Text {
-                      text: modelData.label
-                      color: root.muted(0.5)
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                    }
-
-                    Text {
-                      text: modelData.value
-                      color: root.foreground
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.body
-                      elide: Text.ElideRight
-                      width: parent.width
-                    }
-                  }
-                }
-              }
-            }
-          }
-
-          // ---- sun and moon ---------------------------------------------------
-          // The sun's times come from the provider when it has them and from the arithmetic when
-          // it does not — which is every DWD day. The moon is arithmetic either way.
-          Card {
-            id: skyCard
-            width: parent.width
-            visible: root.sky !== null
-
-            Column {
-              width: parent.width
-              spacing: Style.space(10)
-
-              Row {
-                width: parent.width
-                spacing: Style.space(12)
-
-                Text {
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: Model.conditionGlyph(0, true)
-                  color: root.accent
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.title
-                }
-
-                Column {
-                  anchors.verticalCenter: parent.verticalCenter
-                  spacing: Style.space(1)
-
-                  Text {
-                    text: root.sky
-                      ? [root.sky.sunriseLabel, root.sky.sunsetLabel].filter(function(part) { return !!part }).join(" → ")
-                      : ""
-                    color: root.foreground
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.body
-                  }
-
-                  Text {
-                    text: root.sky
-                      ? [root.sky.daylightLabel, root.sky.sunEventLabel].filter(function(part) { return !!part }).join(" · ")
-                      : ""
-                    color: root.muted(0.55)
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                  }
-                }
-              }
-
-              // How far through the daylight it is, and nothing at all once the sun is down.
-              Rectangle {
-                width: parent.width
-                height: 2
-                radius: 1
-                visible: root.sky !== null && root.sky.daylightProgress !== null && root.sky.daylightProgress !== undefined
-                color: Model.withAlpha(root.foreground, 0.14)
-
-                Rectangle {
-                  width: parent.width * (root.sky && root.sky.daylightProgress ? root.sky.daylightProgress : 0)
-                  height: parent.height
-                  radius: parent.radius
-                  color: root.accent
-                }
-              }
-
-              Row {
-                width: parent.width
-                spacing: Style.space(12)
-
-                MoonDisc {
-                  anchors.verticalCenter: parent.verticalCenter
-                  illumination: root.sky ? Number(root.sky.moonIllumination) : 0
-                  waxing: root.sky ? root.sky.moonWaxing === true : true
-                  color: root.foreground
-                }
-
-                Column {
-                  anchors.verticalCenter: parent.verticalCenter
-                  spacing: Style.space(1)
-
-                  Text {
-                    text: root.sky ? root.sky.moonPhaseLabel : ""
-                    color: root.foreground
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.body
-                  }
-
-                  Text {
-                    text: root.sky ? root.sky.moonLabel : ""
-                    color: root.muted(0.55)
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                  }
-                }
-              }
-            }
-          }
-
-          // ---- rain nowcast --------------------------------------------------
-          Card {
-            id: nowcastCard
-            width: parent.width
-            visible: root.nowcast !== null
-
-            Column {
-              width: parent.width
-              spacing: Style.space(8)
-
-              Item {
-                width: parent.width
-                height: Math.max(nowcastTitle.implicitHeight, nowcastSource.implicitHeight)
-
-                Text {
-                  id: nowcastTitle
-                  anchors.left: parent.left
-                  text: "Rain nowcast"
-                  color: root.foreground
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.subtitle
-                }
-
-                Text {
-                  id: nowcastSource
-                  anchors.right: parent.right
-                  text: root.nowcast ? root.nowcast.provider.attribution : ""
-                  color: root.muted(0.5)
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                }
-              }
-
-              NowcastChart {
-                width: parent.width
-                visible: root.nowcast !== null
-                points: root.nowcast ? root.nowcast.points : []
-                slotMinutes: root.nowcast ? root.nowcast.slotMinutes : 5
-                clock24: root.clock24
-                hoveredIndex: -1
-              }
-
-              Text {
-                width: parent.width
-                wrapMode: Text.WordWrap
-                text: root.nowcast ? Model.summaryLine(root.nowcast, root.clock24) : ""
-                color: root.muted(0.85)
-                font.family: Style.font.family
-                font.pixelSize: Style.font.body
-              }
-
-              Text {
-                width: parent.width
-                text: root.nowcast ? Model.statusLine(root.nowcast, root.clock24) : ""
-                color: root.muted(0.45)
-                font.family: Style.font.family
-                font.pixelSize: Style.font.caption
-              }
-            }
-          }
-
-          // ---- the radar map --------------------------------------------------
-          // DWD's composite, which answers in the projection it is asked for, over coastlines
-          // vendored from Natural Earth. Drag it, wheel to zoom, step through the frames.
-          Card {
-            id: mapCard
-            width: parent.width
-            visible: root.view !== null
-
-            Column {
-              width: parent.width
-              spacing: Style.space(8)
-
-              Item {
-                width: parent.width
-                height: Math.max(mapTitle.implicitHeight, mapHint.implicitHeight)
-
-                Text {
-                  id: mapTitle
-                  anchors.left: parent.left
-                  text: "Rain map"
-                  color: root.foreground
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.subtitle
-                }
-
-                Text {
-                  id: mapHint
-                  anchors.right: parent.right
-                  text: "drag to move · wheel to zoom"
-                  color: root.muted(0.5)
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                }
-              }
-
-              RadarMap {
-                width: parent.width
-                location: root.view ? root.view.location : null
-                radar: root.radar
-                theme: root.theme
-                clock24: root.clock24
-                notice: root.radarNotice
-                // The window is kept loaded between summons: a map still playing behind a closed
-                // window would keep asking for one image per frame.
-                active: window.visible
-
-                onImageNeeded: function(bbox, width, height, timeMs) {
-                  root.requestRadar(bbox, width, height, timeMs)
-                }
-              }
-            }
-          }
-
-          // ---- next hours ----------------------------------------------------
-          Card {
-            id: hoursCard
-            width: parent.width
-            visible: root.hourlyRows.length > 0
-
-            Column {
-              width: parent.width
-              spacing: Style.space(8)
-
-              Text {
-                text: "Next " + root.hourlyRows.length + " hours"
-                color: root.foreground
-                font.family: Style.font.family
-                font.pixelSize: Style.font.subtitle
-              }
-
-              HourStrip {
-                width: parent.width
-                hours: root.hourlyRows
-                foreground: root.foreground
-                accent: root.accent
-              }
-            }
-          }
-
-          // ---- days ----------------------------------------------------------
-          Card {
-            id: daysCard
-            width: parent.width
-            visible: root.dailyRows.length > 0
-
-            Column {
-              width: parent.width
-              spacing: Style.space(6)
-
-              // Titled like the hours card above it; without a header the day rows read as a
-              // loose list of figures.
-              Text {
-                text: "Next " + root.dailyRows.length + " days"
-                color: root.foreground
-                font.family: Style.font.family
-                font.pixelSize: Style.font.subtitle
-              }
-
-              Repeater {
-                model: root.dailyRows
-
-                delegate: Item {
+                Item {
                   width: parent.width
-                  height: Math.max(dayGlyph.implicitHeight, dayHigh.implicitHeight) + Style.space(6)
-
-                  // The whole row opens that day's hours; the open one is the one that closes. The
-                  // cursor is the row the keyboard is on, which is a third thing again.
-                  readonly property bool opened: root.dayDetail !== null
-                    && String(root.dayDetail.date) === String(modelData.date)
-                  readonly property bool cursored: index === root.dayCursor
-
-                  Rectangle {
-                    anchors.fill: parent
-                    anchors.leftMargin: -Style.space(6)
-                    anchors.rightMargin: -Style.space(6)
-                    radius: Style.cornerRadius
-                    color: Model.withAlpha(root.foreground,
-                      opened ? 0.1 : (cursored ? 0.07 : (dayRow.containsMouse ? 0.06 : 0)))
-                    border.width: cursored ? 1 : 0
-                    border.color: Model.withAlpha(root.accent, 0.7)
-                  }
-
-                  MouseArea {
-                    id: dayRow
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.openDay(modelData)
-                  }
+                  height: Math.max(heroGlyph.implicitHeight, heroColumn.implicitHeight)
 
                   Text {
-                    id: dayName
+                    id: heroGlyph
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
-                    width: Style.space(84)
-                    text: modelData.dayLabel
-                    color: index === 0 || parent.opened ? root.foreground : root.muted(0.8)
+                    text: root.heroGlyph
+                    color: root.accent
                     font.family: Style.font.family
-                    font.pixelSize: Style.font.body
-                    elide: Text.ElideRight
+                    font.pixelSize: Style.font.displayLarge
                   }
 
-                  Text {
-                    id: dayGlyph
-                    anchors.left: dayName.right
+                  Column {
+                    id: heroColumn
+                    anchors.left: heroGlyph.right
+                    anchors.leftMargin: Style.space(14)
                     anchors.verticalCenter: parent.verticalCenter
-                    text: Model.conditionGlyph(modelData.weatherCode, true)
+                    spacing: Style.space(2)
+
+                    Text {
+                      text: root.current ? (root.current.temperatureLabel || "—") : "—"
+                      color: root.foreground
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.display
+                    }
+
+                    Text {
+                      text: root.current
+                        ? [root.current.conditionLabel, root.current.feelsLikeLabel].filter(function(part) { return !!part }).join(" · ")
+                        : ""
+                      color: root.muted(0.75)
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.subtitle
+                    }
+                  }
+                }
+
+                Grid {
+                  width: parent.width
+                  columns: 3
+                  columnSpacing: Style.space(12)
+                  rowSpacing: Style.space(8)
+
+                  Repeater {
+                    model: root.stats
+
+                    delegate: Column {
+                      width: (parent.width - Style.space(24)) / 3
+                      spacing: Style.space(1)
+
+                      Text {
+                        text: modelData.label
+                        color: root.muted(0.5)
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                      }
+
+                      Text {
+                        text: modelData.value
+                        color: root.foreground
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.body
+                        elide: Text.ElideRight
+                        width: parent.width
+                      }
+                    }
+                  }
+                }
+              }
+            }
+
+            // ---- sun and moon ---------------------------------------------------
+            // The sun's times come from the provider when it has them and from the arithmetic when
+            // it does not — which is every DWD day. The moon is arithmetic either way.
+            Card {
+              id: skyCard
+              width: parent.width
+              y: root.stackY(skyCard)
+              visible: root.cardShown("sky") && root.sky !== null
+
+              Column {
+                width: parent.width
+                spacing: Style.space(10)
+
+                Row {
+                  width: parent.width
+                  spacing: Style.space(12)
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: Model.conditionGlyph(0, true)
                     color: root.accent
                     font.family: Style.font.family
                     font.pixelSize: Style.font.title
                   }
 
-                  Text {
-                    id: dayRain
-                    anchors.left: dayGlyph.right
-                    anchors.leftMargin: Style.space(10)
+                  Column {
                     anchors.verticalCenter: parent.verticalCenter
-                    text: modelData.precipitationLabel || ""
-                    color: root.muted(0.55)
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                  }
-
-                  Row {
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: Style.space(8)
+                    spacing: Style.space(1)
 
                     Text {
-                      text: "UV " + (modelData.uvLabel || "—")
-                      color: root.muted(0.5)
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                    }
-
-                    Text {
-                      id: dayLow
-                      text: modelData.lowLabel || "—"
-                      color: root.muted(0.6)
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.body
-                    }
-
-                    Text {
-                      id: dayHigh
-                      text: modelData.highLabel || "—"
+                      text: root.sky
+                        ? [root.sky.sunriseLabel, root.sky.sunsetLabel].filter(function(part) { return !!part }).join(" → ")
+                        : ""
                       color: root.foreground
                       font.family: Style.font.family
                       font.pixelSize: Style.font.body
                     }
+
+                    Text {
+                      text: root.sky
+                        ? [root.sky.daylightLabel, root.sky.sunEventLabel].filter(function(part) { return !!part }).join(" · ")
+                        : ""
+                      color: root.muted(0.55)
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+                  }
+                }
+
+                // How far through the daylight it is, and nothing at all once the sun is down.
+                Rectangle {
+                  width: parent.width
+                  height: 2
+                  radius: 1
+                  visible: root.sky !== null && root.sky.daylightProgress !== null && root.sky.daylightProgress !== undefined
+                  color: Model.withAlpha(root.foreground, 0.14)
+
+                  Rectangle {
+                    width: parent.width * (root.sky && root.sky.daylightProgress ? root.sky.daylightProgress : 0)
+                    height: parent.height
+                    radius: parent.radius
+                    color: root.accent
+                  }
+                }
+
+                Row {
+                  width: parent.width
+                  spacing: Style.space(12)
+
+                  MoonDisc {
+                    anchors.verticalCenter: parent.verticalCenter
+                    illumination: root.sky ? Number(root.sky.moonIllumination) : 0
+                    waxing: root.sky ? root.sky.moonWaxing === true : true
+                    color: root.foreground
+                  }
+
+                  Column {
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Style.space(1)
+
+                    Text {
+                      text: root.sky ? root.sky.moonPhaseLabel : ""
+                      color: root.foreground
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.body
+                    }
+
+                    Text {
+                      text: root.sky ? root.sky.moonLabel : ""
+                      color: root.muted(0.55)
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
                   }
                 }
               }
+            }
 
-              Text {
+            // ---- rain nowcast --------------------------------------------------
+            Card {
+              id: nowcastCard
+              width: parent.width
+              y: root.stackY(nowcastCard)
+              visible: root.cardShown("nowcast") && root.nowcast !== null
+
+              Column {
                 width: parent.width
-                visible: root.dailyRows.length > 0
-                text: {
-                  var today = root.dailyRows.length > 0 ? root.dailyRows[0] : null
-                  if (!today) return ""
-                  var parts = []
-                  if (today.sunriseLabel) parts.push("sunrise " + today.sunriseLabel)
-                  if (today.sunsetLabel) parts.push("sunset " + today.sunsetLabel)
-                  return parts.join(" · ")
+                spacing: Style.space(8)
+
+                Item {
+                  width: parent.width
+                  height: Math.max(nowcastTitle.implicitHeight, nowcastSource.implicitHeight)
+
+                  Text {
+                    id: nowcastTitle
+                    anchors.left: parent.left
+                    text: "Rain nowcast"
+                    color: root.foreground
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.subtitle
+                  }
+
+                  Text {
+                    id: nowcastSource
+                    anchors.right: parent.right
+                    text: root.nowcast ? root.nowcast.provider.attribution : ""
+                    color: root.muted(0.5)
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
                 }
-                color: root.muted(0.45)
-                font.family: Style.font.family
-                font.pixelSize: Style.font.caption
+
+                NowcastPanel {
+                  width: parent.width
+                  visible: root.nowcast !== null
+                  view: root.nowcast
+                  clock24: root.clock24
+                  spacing: Style.space(8)
+                }
               }
             }
-          }
 
-          // ---- one day, opened up ----------------------------------------------
-          // What an opened row in the list above turns into: that day's own figures, then its
-          // hours. Fetched for one date only, so reading a day costs one request.
-          Card {
-            id: dayCard
-            width: parent.width
-            visible: root.dayDetail !== null || root.dayHint !== ""
-
-            Column {
+            // ---- the radar map --------------------------------------------------
+            // DWD's composite, which answers in the projection it is asked for, over coastlines
+            // vendored from Natural Earth. Drag it, wheel to zoom, step through the frames.
+            Card {
+              id: mapCard
               width: parent.width
-              spacing: Style.space(8)
+              y: root.stackY(mapCard)
+              visible: root.cardShown("map") && root.view !== null
 
-              Item {
+              Column {
                 width: parent.width
-                height: Math.max(dayTitle.implicitHeight, dayClose.implicitHeight)
+                spacing: Style.space(8)
+
+                Item {
+                  width: parent.width
+                  height: Math.max(mapTitle.implicitHeight, mapHint.implicitHeight)
+
+                  Text {
+                    id: mapTitle
+                    anchors.left: parent.left
+                    text: "Rain map"
+                    color: root.foreground
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.subtitle
+                  }
+
+                  Text {
+                    id: mapHint
+                    anchors.right: parent.right
+                    text: "drag to move · wheel to zoom"
+                    color: root.muted(0.5)
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+                }
+
+                RadarMap {
+                  width: parent.width
+                  location: root.view ? root.view.location : null
+                  radar: root.radar
+                  theme: root.theme
+                  clock24: root.clock24
+                  durationStyle: root.durationStyle
+                  notice: root.radarNotice
+                  // The window is kept loaded between summons: a map still playing behind a closed
+                  // window would keep asking for one image per frame.
+                  active: window.visible
+
+                  onImageNeeded: function(bbox, width, height, timeMs) {
+                    root.requestRadar(bbox, width, height, timeMs)
+                  }
+                }
+              }
+            }
+
+            // ---- next hours ----------------------------------------------------
+            Card {
+              id: hoursCard
+              width: parent.width
+              y: root.stackY(hoursCard)
+              visible: root.cardShown("hours") && root.hourlyRows.length > 0
+
+              Column {
+                width: parent.width
+                spacing: Style.space(8)
 
                 Text {
-                  id: dayTitle
-                  anchors.left: parent.left
-                  text: root.dayDetail ? root.dayDetail.dayLabel : "Day"
+                  text: "Next " + root.hourlyRows.length + " hours"
                   color: root.foreground
                   font.family: Style.font.family
                   font.pixelSize: Style.font.subtitle
                 }
 
-                Text {
-                  id: dayClose
-                  anchors.right: parent.right
-                  text: "Close"
-                  color: root.muted(0.7)
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-
-                  MouseArea {
-                    anchors.fill: parent
-                    anchors.margins: -Style.space(4)
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.closeDay()
-                  }
+                HourStrip {
+                  width: parent.width
+                  hours: root.hourlyRows
+                  foreground: root.foreground
+                  accent: root.accent
                 }
-              }
-
-              Text {
-                width: parent.width
-                visible: text !== ""
-                text: root.daySummary
-                color: root.muted(0.85)
-                font.family: Style.font.family
-                font.pixelSize: Style.font.body
-              }
-
-              HourStrip {
-                width: parent.width
-                visible: root.dayDetail !== null
-                hours: root.dayDetail ? root.dayDetail.hours : []
-                foreground: root.foreground
-                accent: root.accent
-              }
-
-              Text {
-                width: parent.width
-                visible: text !== ""
-                text: root.dayHint
-                color: root.muted(0.6)
-                font.family: Style.font.family
-                font.pixelSize: Style.font.caption
-              }
-
-              Text {
-                width: parent.width
-                visible: root.dayDetail !== null && root.dayDetail.forecastAttribution !== undefined
-                text: root.dayDetail
-                  ? [root.dayDetail.timezone, root.dayDetail.forecastAttribution].filter(function(part) { return !!part }).join(" · ")
-                  : ""
-                color: root.muted(0.4)
-                font.family: Style.font.family
-                font.pixelSize: Style.font.caption
               }
             }
-          }
 
-          // ---- air -----------------------------------------------------------
-          Card {
-            id: airCard
-            width: parent.width
-            visible: root.air !== null
-
-            Row {
+            // ---- days ----------------------------------------------------------
+            Card {
+              id: daysCard
               width: parent.width
-              spacing: Style.space(16)
+              y: root.stackY(daysCard)
+              visible: root.cardShown("days") && root.dailyRows.length > 0
 
               Column {
-                spacing: Style.space(2)
+                width: parent.width
+                spacing: Style.space(6)
 
+                // Titled like the hours card above it; without a header the day rows read as a
+                // loose list of figures.
                 Text {
-                  text: root.air ? root.air.bandLabel : ""
-                  color: root.air ? Model.aqiColor(root.air.band, root.theme) : root.foreground
+                  text: "Next " + root.dailyRows.length + " days"
+                  color: root.foreground
                   font.family: Style.font.family
-                  font.pixelSize: Style.font.title
+                  font.pixelSize: Style.font.subtitle
+                }
+
+                Repeater {
+                  model: root.dailyRows
+
+                  delegate: Item {
+                    width: parent.width
+                    height: Math.max(dayGlyph.implicitHeight, dayHigh.implicitHeight) + Style.space(6)
+
+                    // The whole row opens that day's hours; the open one is the one that closes. The
+                    // cursor is the row the keyboard is on, which is a third thing again.
+                    readonly property bool opened: root.dayDetail !== null
+                      && String(root.dayDetail.date) === String(modelData.date)
+                    readonly property bool cursored: index === root.dayCursor
+
+                    Rectangle {
+                      anchors.fill: parent
+                      anchors.leftMargin: -Style.space(6)
+                      anchors.rightMargin: -Style.space(6)
+                      radius: Style.cornerRadius
+                      color: Model.withAlpha(root.foreground,
+                        opened ? 0.1 : (cursored ? 0.07 : (dayRow.containsMouse ? 0.06 : 0)))
+                      border.width: cursored ? 1 : 0
+                      border.color: Model.withAlpha(root.accent, 0.7)
+                    }
+
+                    MouseArea {
+                      id: dayRow
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: root.openDay(modelData)
+                    }
+
+                    Text {
+                      id: dayName
+                      anchors.left: parent.left
+                      anchors.verticalCenter: parent.verticalCenter
+                      width: Style.space(84)
+                      text: modelData.dayLabel
+                      color: index === 0 || parent.opened ? root.foreground : root.muted(0.8)
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.body
+                      elide: Text.ElideRight
+                    }
+
+                    Text {
+                      id: dayGlyph
+                      anchors.left: dayName.right
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: Model.conditionGlyph(modelData.weatherCode, true)
+                      color: root.accent
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.title
+                    }
+
+                    Text {
+                      id: dayRain
+                      anchors.left: dayGlyph.right
+                      anchors.leftMargin: Style.space(10)
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: modelData.precipitationLabel || ""
+                      color: root.muted(0.55)
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    Row {
+                      anchors.right: parent.right
+                      anchors.verticalCenter: parent.verticalCenter
+                      spacing: Style.space(8)
+
+                      Text {
+                        text: "UV " + (modelData.uvLabel || "—")
+                        color: root.muted(0.5)
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                      }
+
+                      Text {
+                        id: dayLow
+                        text: modelData.lowLabel || "—"
+                        color: root.muted(0.6)
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.body
+                      }
+
+                      Text {
+                        id: dayHigh
+                        text: modelData.highLabel || "—"
+                        color: root.foreground
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.body
+                      }
+                    }
+                  }
                 }
 
                 Text {
-                  text: "Air quality"
-                  color: root.muted(0.5)
+                  width: parent.width
+                  visible: root.dailyRows.length > 0
+                  text: {
+                    var today = root.dailyRows.length > 0 ? root.dailyRows[0] : null
+                    if (!today) return ""
+                    var parts = []
+                    if (today.sunriseLabel) parts.push("sunrise " + today.sunriseLabel)
+                    if (today.sunsetLabel) parts.push("sunset " + today.sunsetLabel)
+                    return parts.join(" · ")
+                  }
+                  color: root.muted(0.45)
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
                 }
               }
+            }
+
+            // ---- one day, opened up ----------------------------------------------
+            // What an opened row in the list above turns into: that day's own figures, then its
+            // hours. Fetched for one date only, so reading a day costs one request.
+            Card {
+              id: dayCard
+              width: parent.width
+              y: root.stackY(dayCard)
+              visible: root.cardShown("days") && (root.dayDetail !== null || root.dayHint !== "")
 
               Column {
-                spacing: Style.space(1)
+                width: parent.width
+                spacing: Style.space(8)
+
+                Item {
+                  width: parent.width
+                  height: Math.max(dayTitle.implicitHeight, dayClose.implicitHeight)
+
+                  Text {
+                    id: dayTitle
+                    anchors.left: parent.left
+                    text: root.dayDetail ? root.dayDetail.dayLabel : "Day"
+                    color: root.foreground
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.subtitle
+                  }
+
+                  Text {
+                    id: dayClose
+                    anchors.right: parent.right
+                    text: "Close"
+                    color: root.muted(0.7)
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+
+                    MouseArea {
+                      anchors.fill: parent
+                      anchors.margins: -Style.space(4)
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: root.closeDay()
+                    }
+                  }
+                }
 
                 Text {
-                  text: root.air && root.air.europeanAqi !== null && root.air.europeanAqi !== undefined
-                    ? "European AQI " + Math.round(root.air.europeanAqi)
-                    : "European AQI —"
-                  color: root.foreground
+                  width: parent.width
+                  visible: text !== ""
+                  text: root.daySummary
+                  color: root.muted(0.85)
                   font.family: Style.font.family
                   font.pixelSize: Style.font.body
                 }
 
+                HourStrip {
+                  width: parent.width
+                  visible: root.dayDetail !== null
+                  hours: root.dayDetail ? root.dayDetail.hours : []
+                  foreground: root.foreground
+                  accent: root.accent
+                }
+
                 Text {
-                  text: root.air
-                    ? ["PM2.5 " + (root.air.pm25Label || "—"), "PM10 " + (root.air.pm10Label || "—")].join(" · ")
-                    : ""
-                  color: root.muted(0.55)
+                  width: parent.width
+                  visible: text !== ""
+                  text: root.dayHint
+                  color: root.muted(0.6)
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
+                }
+
+                Text {
+                  width: parent.width
+                  visible: root.dayDetail !== null && root.dayDetail.forecastAttribution !== undefined
+                  text: root.dayDetail
+                    ? [root.dayDetail.timezone, root.dayDetail.forecastAttribution].filter(function(part) { return !!part }).join(" · ")
+                    : ""
+                  color: root.muted(0.4)
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                }
+              }
+            }
+
+            // ---- air -----------------------------------------------------------
+            Card {
+              id: airCard
+              width: parent.width
+              y: root.stackY(airCard)
+              visible: root.cardShown("air") && root.air !== null
+
+              Row {
+                width: parent.width
+                spacing: Style.space(16)
+
+                Column {
+                  spacing: Style.space(2)
+
+                  Text {
+                    text: root.air ? root.air.bandLabel : ""
+                    color: root.air ? Model.aqiColor(root.air.band, root.theme) : root.foreground
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.title
+                  }
+
+                  Text {
+                    text: "Air quality"
+                    color: root.muted(0.5)
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+                }
+
+                Column {
+                  spacing: Style.space(1)
+
+                  Text {
+                    text: root.air && root.air.europeanAqi !== null && root.air.europeanAqi !== undefined
+                      ? "European AQI " + Math.round(root.air.europeanAqi)
+                      : "European AQI —"
+                    color: root.foreground
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.body
+                  }
+
+                  Text {
+                    text: root.air
+                      ? ["PM2.5 " + (root.air.pm25Label || "—"), "PM10 " + (root.air.pm10Label || "—")].join(" · ")
+                      : ""
+                    color: root.muted(0.55)
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+                }
+              }
+            }
+
+            // One grip per card, in the card's top corner. Dragging it moves the card; the
+            // others make way as it passes them.
+            Repeater {
+              model: root.defaultCards
+
+              delegate: Item {
+                id: grip
+                readonly property string cardId: modelData
+                readonly property var lead: root.cardItems[cardId][0]
+                readonly property bool dragging: root.dragId === cardId
+                visible: root.cardItems[cardId].some(function(item) { return item.visible })
+                z: dragging ? 30 : 20
+                width: Style.space(18)
+                height: Style.space(14)
+                x: lead.width - width - Style.space(4)
+                y: lead.y + Style.space(3)
+                opacity: dragging || gripArea.containsMouse ? 1 : 0.4
+
+                Text {
+                  anchors.centerIn: parent
+                  text: "⠿"
+                  color: root.foreground
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                }
+
+                MouseArea {
+                  id: gripArea
+                  anchors.fill: parent
+                  anchors.margins: -Style.space(3)
+                  hoverEnabled: true
+                  cursorShape: grip.dragging ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                  // Dragging must not hand the pointer to the scroller underneath.
+                  preventStealing: true
+                  onPressed: function(mouse) {
+                    root.beginDrag(grip.cardId, mapToItem(cardStack, mouse.x, mouse.y).y)
+                  }
+                  onPositionChanged: function(mouse) {
+                    if (pressed) root.dragTo(mapToItem(cardStack, mouse.x, mouse.y).y)
+                  }
+                  onReleased: root.endDrag()
+                  onCanceled: root.endDrag()
                 }
               }
             }

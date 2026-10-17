@@ -96,3 +96,6 @@ Look at the image, and then check the pixels. Three of the five above were found
 the PNG and reading it, and the two that a look would only have called "a bit odd" — a canvas
 that silently drew nothing, and an accent colour that fell back to grey — were settled by
 counting pixels of a known colour.
+
+`layout` case: `drivers/AppLayout.qml` moves cards by Alt+↓, by dragging a grip and by hiding one, logs the
+resulting order, then photographs the window with a stored layout and the `words` duration style.

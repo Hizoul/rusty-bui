@@ -47,9 +47,10 @@ def intensity_class(mm_per_hour: float) -> str:
 
 def minutes_label(minutes: int) -> str:
     hours, rest = divmod(minutes, 60)
+    # The colon style, the default: "25m", "1:06h". Mirrors format_minutes in nowcast.rs.
     if hours == 0:
-        return f"{rest} min"
-    return f"{hours} h {rest:02d}"
+        return f"{rest}m"
+    return f"{hours}:{rest:02d}h"
 
 
 def main() -> None:
@@ -80,6 +81,9 @@ def main() -> None:
         "peakMmPerHour": peak["mmPerHour"],
         "peakInMinutes": peak["offsetMinutes"],
         "peakInLabel": minutes_label(peak["offsetMinutes"]),
+        "lastsLabel": minutes_label(
+            ends["offsetMinutes"] + ends["intervalMinutes"] - starts["offsetMinutes"]
+        ),
     }
     payload["synthetic"] = True
 

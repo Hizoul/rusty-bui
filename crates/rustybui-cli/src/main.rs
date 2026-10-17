@@ -10,7 +10,7 @@ use clap::{Args, Parser, Subcommand};
 use config::Config;
 use rustybui_core::{
     format_millimetres, format_pressure, format_rate, format_speed, format_temperature, AppParts,
-    AppView, DayView, DiskCache, Forecast, ForecastView, Location, NowcastService, NowcastView,
+    AppView, DayView, DiskCache, DurationStyle, Forecast, ForecastView, Location, NowcastService, NowcastView,
     OpenMeteoClient, ResponseCache,
 };
 
@@ -156,6 +156,11 @@ struct PrefsView {
     hours: usize,
     offline: bool,
     units: String,
+    /// `colon`, `words` or `compact`.
+    duration_style: String,
+    /// Every card, top to bottom, and the ones switched off.
+    card_order: Vec<String>,
+    hidden_cards: Vec<String>,
     /// Which of these the user has actually chosen, so a front-end can use its own default
     /// for the rest instead of overriding it with ours.
     stored: StoredPrefs,
@@ -174,6 +179,8 @@ struct StoredPrefs {
     hours: bool,
     offline: bool,
     units: bool,
+    duration: bool,
+    cards: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -192,11 +199,16 @@ impl PrefsView {
             hours: config.window_hours(),
             offline: config.is_offline(),
             units: if config.imperial_units() { "imperial" } else { "metric" }.to_string(),
+            duration_style: config.duration_style().as_str().to_string(),
+            card_order: config.cards_in_order(),
+            hidden_cards: config.hidden_card_ids(),
             stored: StoredPrefs {
                 clock: config.clock.is_some(),
                 hours: config.hours.is_some(),
                 offline: config.offline.is_some(),
                 units: config.units.is_some(),
+                duration: config.duration.is_some(),
+                cards: !config.card_order.is_empty() || !config.hidden_cards.is_empty(),
             },
             location: config.location.clone(),
             places: config.places.clone(),
@@ -277,6 +289,18 @@ struct PrefsArgs {
     /// `metric` (mm) or `imperial`.
     #[arg(long)]
     units: Option<String>,
+    /// How minutes are written: `colon` (1:31h), `words` (1 h 31 min) or `compact` (1h31).
+    #[arg(long)]
+    duration: Option<String>,
+    /// The window's cards, top to bottom, comma separated.
+    #[arg(long, value_name = "IDS", value_delimiter = ',')]
+    card_order: Option<Vec<String>>,
+    /// Cards to switch off, comma separated; an empty value shows them all.
+    #[arg(long, value_name = "IDS", value_delimiter = ',')]
+    hidden_cards: Option<Vec<String>>,
+    /// Back to the shipped card order, everything shown.
+    #[arg(long)]
+    reset_layout: bool,
 }
 
 #[derive(Args)]
@@ -341,7 +365,7 @@ async fn main() -> Result<()> {
 Open-Meteo returned nothing"
                 )
             })?;
-            let view = NowcastView::new(&location, &nowcast, Utc::now(), imperial);
+            let view = NowcastView::new(&location, &nowcast, Utc::now(), imperial, config.duration_style());
 
             if args.json {
                 println!("{}", serde_json::to_string_pretty(&view)?);
@@ -370,7 +394,7 @@ Open-Meteo returned nothing"
 
             match service.nowcast(&location, cli.refresh).await {
                 Some(nowcast) => {
-                    let view = NowcastView::new(&location, &nowcast, Utc::now(), imperial);
+                    let view = NowcastView::new(&location, &nowcast, Utc::now(), imperial, config.duration_style());
                     if args.json {
                         // The popout takes the nowcast view from this payload; the temperature
                         // rides along so the pill needs one process rather than two.
@@ -497,6 +521,7 @@ Open-Meteo returned nothing"
                 hours,
                 imperial,
                 clock24,
+                config.duration_style(),
             );
 
             if args.text {
@@ -695,7 +720,11 @@ Open-Meteo returned nothing"
             let changed = args.clock.is_some()
                 || args.hours.is_some()
                 || args.offline.is_some()
-                || args.units.is_some();
+                || args.units.is_some()
+                || args.duration.is_some()
+                || args.card_order.is_some()
+                || args.hidden_cards.is_some()
+                || args.reset_layout;
 
             if let Some(clock) = args.clock {
                 config.clock = Some(clock);
@@ -709,6 +738,22 @@ Open-Meteo returned nothing"
             if let Some(units) = args.units {
                 config.units = Some(units);
             }
+            if let Some(duration) = args.duration {
+                let style = DurationStyle::parse(&duration).with_context(|| {
+                    format!("unknown duration style `{duration}` — use colon, words or compact")
+                })?;
+                config.duration = Some(style.as_str().to_string());
+            }
+            if args.reset_layout {
+                config.card_order.clear();
+                config.hidden_cards.clear();
+            }
+            if let Some(order) = args.card_order {
+                config.card_order = order.into_iter().filter(|id| !id.is_empty()).collect();
+            }
+            if let Some(hidden) = args.hidden_cards {
+                config.hidden_cards = hidden.into_iter().filter(|id| !id.is_empty()).collect();
+            }
 
             if changed {
                 config.save()?;
@@ -720,6 +765,9 @@ Open-Meteo returned nothing"
                 println!("clock   : {}", if config.clock_is_24h() { "24h" } else { "12h" });
                 println!("hours   : {}", config.window_hours());
                 println!("offline : {}", config.is_offline());
+                println!("duration: {}", config.duration_style().as_str());
+                println!("cards   : {}", config.cards_in_order().join(", "));
+                println!("hidden  : {}", config.hidden_card_ids().join(", "));
                 println!(
                     "units   : {}",
                     if config.imperial_units() { "imperial" } else { "metric" }

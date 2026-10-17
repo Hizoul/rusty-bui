@@ -9,7 +9,7 @@
 use crate::alerts::Alert;
 use crate::forecast::{DailyForecast, Forecast, HourlyForecast};
 use crate::location::Location;
-use crate::nowcast::RainNowcast;
+use crate::nowcast::{DurationStyle, RainNowcast};
 use crate::providers::openmeteo::AirQuality;
 use crate::providers::ForecastProvider;
 use crate::view::{LocationView, NowcastView};
@@ -627,6 +627,7 @@ impl AppView {
         hours: usize,
         imperial: bool,
         clock24: bool,
+        style: DurationStyle,
     ) -> Self {
         let offset = parts
             .forecast
@@ -646,7 +647,7 @@ impl AppView {
                 .collect(),
             nowcast: parts
                 .nowcast
-                .map(|nowcast| NowcastView::new(location, nowcast, now, imperial)),
+                .map(|nowcast| NowcastView::new(location, nowcast, now, imperial, style)),
             forecast: parts
                 .forecast
                 .map(|forecast| ForecastView::new(forecast, location, now, hours, imperial, clock24)),
@@ -935,6 +936,7 @@ mod tests {
             12,
             false,
             true,
+            DurationStyle::Colon,
         );
 
         let json = serde_json::to_value(&view).unwrap();
@@ -956,6 +958,7 @@ mod tests {
             12,
             false,
             true,
+            DurationStyle::Colon,
         );
         let json = serde_json::to_value(&empty).unwrap();
         assert!(json.get("nowcast").is_none());
@@ -971,6 +974,7 @@ mod tests {
             12,
             false,
             true,
+            DurationStyle::Colon,
         )
         .headline();
         assert!(headline.starts_with("Leiden: "), "{headline}");
@@ -984,6 +988,7 @@ mod tests {
             12,
             false,
             true,
+            DurationStyle::Colon,
         )
         .headline();
         assert_eq!(headline, "Leiden: 14.2° · Light rain");

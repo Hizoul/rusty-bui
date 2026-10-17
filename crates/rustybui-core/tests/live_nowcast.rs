@@ -111,7 +111,7 @@ async fn knmi_radar_nowcast_covers_two_hours_for_leiden() {
     assert!((110..=125).contains(&span), "window should be ~2 h, got {span} min");
 
     let summary = nowcast.summary(Utc::now());
-    println!("KNMI summary: {}", summary.pill_text(false));
+    println!("KNMI summary: {}", summary.pill_text(false, rustybui_core::DurationStyle::Colon));
     let (network, cache, stale) = client.stats().snapshot();
     println!("KNMI responses: network {network} · cache {cache} · stale {stale}");
 }
@@ -254,7 +254,7 @@ async fn view_contract_and_cache_round_trip() {
     let location = leiden();
 
     let first = service.nowcast(&location, true).await.expect("first fetch");
-    let view = NowcastView::new(&location, &first, Utc::now(), false);
+    let view = NowcastView::new(&location, &first, Utc::now(), false, rustybui_core::DurationStyle::Colon);
     let json = serde_json::to_value(&view).expect("serialise");
 
     assert_eq!(json["provider"]["id"], "knmi");

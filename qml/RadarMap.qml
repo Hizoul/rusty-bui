@@ -27,6 +27,8 @@ Item {
   property var radar: null
   property var theme: ({ foreground: "#cacccc", accent: "#3b82f6", urgent: "#ef4444" })
   property bool clock24: true
+  // How a span of minutes is written (colon, words or compact), as the preferences say.
+  property string durationStyle: "colon"
   /// Whether the map is on screen at all. The window is kept loaded between summons, so a map
   /// left playing would keep fetching images for a window nobody is looking at.
   property bool active: true
@@ -514,7 +516,7 @@ Item {
       text: {
         if (!(map.shownFrame >= 0 && map.frames.length)) return "–"
         var clock = Model.formatClock(map.frames[map.shownFrame], map.clock24)
-        var age = Model.frameAge(map.frames[map.shownFrame], Date.now())
+        var age = Model.frameAge(map.frames[map.shownFrame], Date.now(), map.durationStyle)
         return age === "" || age === "now" ? clock : clock + " · " + age
       }
       color: map.theme.foreground

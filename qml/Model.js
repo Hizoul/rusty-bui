@@ -73,7 +73,7 @@ function pillText(view, temperatureLabel, options) {
   var state = ""
   if (hasView && showState) {
     if (summary.isRainingNow) state = shortIntensity(summary.currentMmPerHour) + " mm/h"
-    else if (isSet(summary.startsInMinutes)) state = compactMinutes(summary.startsInMinutes)
+    else if (isSet(summary.startsInMinutes)) state = labelOrDuration(summary.startsInLabel, summary.startsInMinutes)
   }
 
   var icon = showIcon ? glyph : ""
@@ -90,11 +90,25 @@ function pillText(view, temperatureLabel, options) {
   return text
 }
 
-function compactMinutes(minutes) {
+/// A span of minutes in the user's duration style — "colon" (25m, 1:31h), "words" (25 min,
+/// 1 h 31 min) or "compact" (25m, 1h31). The nowcast payload arrives with its labels already
+/// written by Rust (`format_minutes` in nowcast.rs); this is the one client-side twin, for the
+/// spans only the client can compute (a radar frame's distance from now), and the tests hold
+/// the two to the same vectors.
+function formatDuration(minutes, style) {
   var value = Math.max(0, Math.round(Number(minutes)))
-  if (value < 60) return value + "m"
+  var hours = Math.floor(value / 60)
   var rest = value % 60
-  return Math.floor(value / 60) + "h" + (rest < 10 ? "0" : "") + rest
+  var padded = (rest < 10 ? "0" : "") + rest
+  if (style === "words") return hours === 0 ? rest + " min" : hours + " h " + padded + " min"
+  if (style === "compact") return hours === 0 ? rest + "m" : hours + "h" + padded
+  return hours === 0 ? rest + "m" : hours + ":" + padded + "h"
+}
+
+/// A summary's wait, as the binary wrote it; the twin only fills in for a payload that predates
+/// the label.
+function labelOrDuration(label, minutes) {
+  return isSet(label) && label !== "" ? String(label) : formatDuration(minutes, "colon")
 }
 
 function formatClock(epochMillis, clock24) {
@@ -121,11 +135,12 @@ function summaryLine(view, clock24) {
 
   if (summary.isRainingNow) {
     parts.push(shortIntensity(summary.currentMmPerHour) + " mm/h now")
-    if (isSet(summary.endsInMinutes)) parts.push("stopping in " + compactMinutes(summary.endsInMinutes))
+    if (isSet(summary.endsInMinutes)) parts.push("stopping in " + labelOrDuration(summary.endsInLabel, summary.endsInMinutes))
   } else if (isSet(summary.startsInMinutes)) {
-    parts.push("rain in " + compactMinutes(summary.startsInMinutes))
+    parts.push("rain in " + labelOrDuration(summary.startsInLabel, summary.startsInMinutes))
     if (isSet(summary.endsInMinutes) && Number(summary.endsInMinutes) > Number(summary.startsInMinutes))
-      parts.push("for about " + compactMinutes(Number(summary.endsInMinutes) - Number(summary.startsInMinutes)))
+      parts.push("for about " + labelOrDuration(summary.lastsLabel,
+        Number(summary.endsInMinutes) - Number(summary.startsInMinutes)))
   } else {
     parts.push("no rain expected")
   }
@@ -627,17 +642,15 @@ function frameIndexAt(framesMs, timeMs) {
   return -1
 }
 
-/// How far off that frame is, said the way the rest of the app says it: "in 20 min", "35 min ago",
+/// How far off that frame is, said the way the rest of the app says it: "in 20m", "35m ago",
 /// "now". The stepper's clock already says which frame is on screen; this is the part a person
 /// actually reads, and without it a nowcast frame looks like any other timestamp.
-function frameAge(frameMs, nowMs) {
+function frameAge(frameMs, nowMs, style) {
   if (!isSet(frameMs)) return ""
   var at = isSet(nowMs) ? Number(nowMs) : Date.now()
   var minutes = Math.round((Number(frameMs) - at) / 60000)
   if (Math.abs(minutes) < 1) return "now"
-  var size = Math.abs(minutes) < 60
-    ? Math.abs(minutes) + " min"
-    : Math.floor(Math.abs(minutes) / 60) + " h " + pad(Math.abs(minutes) % 60)
+  var size = formatDuration(Math.abs(minutes), style)
   return minutes > 0 ? "in " + size : size + " ago"
 }
 

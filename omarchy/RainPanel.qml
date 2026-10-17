@@ -38,7 +38,6 @@ Panel {
   property var view: null
   property string errorText: ""
   property string hintText: ""
-  property int hoveredIndex: -1
 
   readonly property string label: view
     ? Model.pillText(view, view.temperatureLabel, {
@@ -55,15 +54,6 @@ Panel {
     lines.push(Model.locationLine(view) + ": " + Model.summaryLine(view, clock24))
     lines.push(Model.providerLine(view) + " · " + Model.statusLine(view, clock24))
     return lines.join("\n")
-  }
-
-  readonly property string detailText: {
-    if (!view) return ""
-    if (hoveredIndex >= 0 && hoveredIndex < view.points.length) {
-      const point = view.points[hoveredIndex]
-      return Model.formatClock(point.timeMs, clock24) + " · " + Model.shortIntensity(point.mmPerHour) + " mm/h · " + String(point.class).replace("-", " ")
-    }
-    return Model.summaryLine(view, clock24)
   }
 
   readonly property string subtitleText: {
@@ -98,7 +88,7 @@ Panel {
   function close() {
     if (root.bar && root.bar.setCenterHoverRevealSuppressed)
       root.bar.setCenterHoverRevealSuppressed(false)
-    root.hoveredIndex = -1
+    nowcastPanel.hoveredIndex = -1
     root.controller.hide()
   }
 
@@ -139,7 +129,6 @@ Panel {
     root.view = parsed.view
     root.errorText = ""
     root.hintText = ""
-    if (root.hoveredIndex >= parsed.view.points.length) root.hoveredIndex = -1
   }
 
   // Radar republishes every 5 minutes; polling at that rate costs the binary
@@ -207,32 +196,12 @@ Panel {
           font.pixelSize: Style.font.bodySmall
         }
 
-        NowcastChart {
+        NowcastPanel {
+          id: nowcastPanel
           width: parent.width
           visible: root.view !== null
-          points: root.view ? root.view.points : []
-          slotMinutes: root.view ? root.view.slotMinutes : 5
+          view: root.view
           clock24: root.clock24
-          hoveredIndex: root.hoveredIndex
-          onHovered: function(index) { root.hoveredIndex = index }
-        }
-
-        Text {
-          width: parent.width
-          text: root.detailText
-          wrapMode: Text.WordWrap
-          color: root.muted(root.hoveredIndex >= 0 ? 0.95 : 0.8)
-          font.family: Style.font.family
-          font.pixelSize: Style.font.body
-        }
-
-        Text {
-          width: parent.width
-          visible: root.view !== null
-          text: root.view ? Model.statusLine(root.view, root.clock24) : ""
-          color: root.muted(0.5)
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
         }
 
         Text {

@@ -3,7 +3,7 @@
 //! `~/.config/rustybui/config.json`, overridable with `RUSTYBUI_CONFIG`.
 
 use anyhow::{Context, Result};
-use rustybui_core::Location;
+use rustybui_core::{DurationStyle, Location};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -26,7 +26,22 @@ pub struct Config {
     /// The app window reads the last cached answers and fetches nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offline: Option<bool>,
+    /// How spans of minutes are written: `colon` (1:31h), `words` (1 h 31 min) or `compact`
+    /// (1h31). Absent means colon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration: Option<String>,
+    /// The window's cards, top to bottom. Absent means [`DEFAULT_CARDS`]; unknown ids are
+    /// dropped and missing ones appended on the way out, so a stale file cannot lose a card.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub card_order: Vec<String>,
+    /// Cards the user has switched off.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden_cards: Vec<String>,
 }
+
+/// The cards a person can move and hide, in the order the window ships them. The settings,
+/// warnings and footer are page furniture, and an opened day stays glued to the days card.
+pub const DEFAULT_CARDS: [&str; 7] = ["now", "sky", "nowcast", "map", "hours", "days", "air"];
 
 /// How many places the settings card can show in one go, and so how many are kept. A cap
 /// rather than a scroll: the row is for the four or five places a person actually lives in.
@@ -42,6 +57,25 @@ impl Config {
 
     pub fn clock_is_24h(&self) -> bool {
         !self.clock.as_deref().is_some_and(|clock| clock.eq_ignore_ascii_case("12h"))
+    }
+
+    pub fn duration_style(&self) -> DurationStyle {
+        self.duration.as_deref().and_then(DurationStyle::parse).unwrap_or_default()
+    }
+
+    /// Every card exactly once: the stored order for the ones it names, the rest after them.
+    pub fn cards_in_order(&self) -> Vec<String> {
+        let mut order: Vec<String> = Vec::new();
+        for id in self.card_order.iter().map(String::as_str).chain(DEFAULT_CARDS) {
+            if DEFAULT_CARDS.contains(&id) && !order.iter().any(|known| known == id) {
+                order.push(id.to_string());
+            }
+        }
+        order
+    }
+
+    pub fn hidden_card_ids(&self) -> Vec<String> {
+        self.cards_in_order().into_iter().filter(|id| self.hidden_cards.contains(id)).collect()
     }
 
     pub fn is_offline(&self) -> bool {
@@ -141,6 +175,27 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn card_order_keeps_what_it_knows_and_never_loses_a_card() {
+        let mut config = Config::default();
+        assert_eq!(config.cards_in_order(), DEFAULT_CARDS);
+        config.card_order = vec!["air".into(), "bogus".into(), "map".into(), "air".into()];
+        let order = config.cards_in_order();
+        assert_eq!(&order[..2], ["air", "map"]);
+        assert_eq!(order.len(), DEFAULT_CARDS.len());
+        config.hidden_cards = vec!["map".into(), "bogus".into()];
+        assert_eq!(config.hidden_card_ids(), ["map"]);
+    }
+
+    #[test]
+    fn an_unknown_duration_falls_back_to_colon() {
+        let mut config = Config::default();
+        config.duration = Some("nonsense".into());
+        assert_eq!(config.duration_style(), DurationStyle::Colon);
+        config.duration = Some("Words".into());
+        assert_eq!(config.duration_style(), DurationStyle::Words);
+    }
 
     fn place(name: &str, latitude: f64, longitude: f64) -> Location {
         let mut location = Location::new(name, latitude, longitude);
