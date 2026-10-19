@@ -50,9 +50,13 @@ Panel {
   property string searchHint: ""
   property var pendingPlace: null
 
+  // Configured and waiting for the first payload: nothing to show yet, but the pill should
+  // still be there so the user knows the plugin is alive. A failed run is not loading.
+  readonly property bool loading: !view && !needsLocation && errorText === "" && hintText === ""
+
   readonly property string label: {
     if (needsLocation) return Model.GLYPH.setup
-    if (!view) return ""
+    if (!view) return loading ? Model.GLYPH.loading : ""
     return Model.pillText(view, view.temperatureLabel, {
       showIcon: root.showIcon,
       showState: root.showState,

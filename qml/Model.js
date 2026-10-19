@@ -11,7 +11,8 @@ var GLYPH = {
   rain: "\ue318", // rain
   light: "\ue333", // showers / light rain
   dry: "\ue33d", // cloudy — nothing expected
-  setup: "\uf041" // map marker — no location stored yet, the pill opens the set-up popout
+  setup: "\uf041", // map marker — no location stored yet, the pill opens the set-up popout
+  loading: "\uf110" // spinner — location set, first payload still on its way
 }
 
 // Parses stdout of `rustybui bar --json`. `null` is the binary's way of saying
