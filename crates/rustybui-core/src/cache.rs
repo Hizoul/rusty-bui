@@ -16,6 +16,7 @@
 
 use crate::location::Location;
 use crate::nowcast::RainNowcast;
+use crate::private_file::write_private;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -114,13 +115,10 @@ impl DiskCache {
         if !self.enabled || nowcast.is_empty() {
             return;
         }
-        if std::fs::create_dir_all(&self.dir).is_err() {
-            return;
-        }
         let entry = CycleEntry { cycle, nowcast: nowcast.clone() };
         if let Ok(raw) = serde_json::to_string(&entry) {
             // Best-effort: a failed cache write must never break a fetch.
-            let _ = std::fs::write(self.path_for(location), raw);
+            let _ = write_private(&self.path_for(location), raw.as_bytes());
         }
     }
 
@@ -237,16 +235,13 @@ impl ResponseCache {
         if !self.enabled {
             return;
         }
-        if std::fs::create_dir_all(&self.dir).is_err() {
-            return;
-        }
         let entry = CachedResponse {
             url: url.to_string(),
             fetched_at: Utc::now().timestamp(),
             body: body.to_string(),
         };
         if let Ok(raw) = serde_json::to_string(&entry) {
-            let _ = std::fs::write(self.path_for(key), raw);
+            let _ = write_private(&self.path_for(key), raw.as_bytes());
         }
     }
 

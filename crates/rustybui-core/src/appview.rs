@@ -481,7 +481,7 @@ impl SkyView {
         Self {
             sunrise_label: sunrise.map(|time| clock(time.with_timezone(&offset), clock24)),
             sunset_label: sunset.map(|time| clock(time.with_timezone(&offset), clock24)),
-            daylight_label: daylight.map(|span| duration_words(span)),
+            daylight_label: daylight.map(duration_words),
             daylight_progress,
             sun_event_label,
             is_daylight,

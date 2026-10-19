@@ -5,7 +5,7 @@
 use anyhow::{Context, Result};
 use rustybui_core::{DurationStyle, Location};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
@@ -111,18 +111,19 @@ impl Config {
 
     pub fn save(&self) -> Result<PathBuf> {
         let path = Self::path().context("no HOME or XDG_CONFIG_HOME to write a config to")?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("creating {}", parent.display()))?;
-        }
         let body = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, body).with_context(|| format!("writing {}", path.display()))?;
+        write_private(&path, body.as_bytes())?;
         Ok(path)
     }
 
     pub fn imperial_units(&self) -> bool {
         self.units.as_deref().is_some_and(|units| units.eq_ignore_ascii_case("imperial"))
     }
+}
+
+/// The config holds precise coordinates and saved places, so it is written owner-only.
+fn write_private(path: &Path, body: &[u8]) -> Result<()> {
+    rustybui_core::write_private(path, body).with_context(|| format!("writing {}", path.display()))
 }
 
 /// Saved places: the ones a person switches between, so that coming back does not mean
@@ -274,6 +275,29 @@ mod tests {
 
         assert!(config.use_place("Utrecht").is_none());
         assert_eq!(config.location.as_ref().map(|l| l.name.as_str()), Some("Berlin"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saved_config_is_owner_only_even_over_an_old_world_readable_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("rustybui-perms-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("rustybui").join("config.json");
+
+        // A new directory and file are private from the start.
+        write_private(&path, b"{}").unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(path.parent().unwrap()), 0o700);
+        assert_eq!(mode(&path), 0o600);
+
+        // An existing world-readable file (from an older version) is tightened on save.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_private(&path, b"{\"units\":\"imperial\"}").unwrap();
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"units\":\"imperial\"}");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

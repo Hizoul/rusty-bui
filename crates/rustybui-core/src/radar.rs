@@ -228,25 +228,15 @@ impl RadarMapClient {
 
 /// Writes through a temporary file, so a reader never sees half an image.
 fn write_atomically(path: &Path, bytes: &[u8]) -> ProviderResult<()> {
-    let Some(parent) = path.parent() else {
+    if path.parent().is_none() {
         return Err(ProviderError::Unavailable {
             provider: "DWD",
             reason: "the map cache path has no directory".to_string(),
         });
-    };
-    std::fs::create_dir_all(parent).map_err(|error| ProviderError::Unavailable {
+    }
+    crate::private_file::write_private(path, bytes).map_err(|error| ProviderError::Unavailable {
         provider: "DWD",
-        reason: format!("creating {}: {error}", parent.display()),
-    })?;
-
-    let temporary = path.with_extension("png.part");
-    std::fs::write(&temporary, bytes).map_err(|error| ProviderError::Unavailable {
-        provider: "DWD",
-        reason: format!("writing {}: {error}", temporary.display()),
-    })?;
-    std::fs::rename(&temporary, path).map_err(|error| ProviderError::Unavailable {
-        provider: "DWD",
-        reason: format!("renaming to {}: {error}", path.display()),
+        reason: format!("writing {}: {error}", path.display()),
     })
 }
 
