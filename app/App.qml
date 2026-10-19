@@ -93,7 +93,7 @@ Item {
   // The binary stores both (the same file the CLI reads). `layoutOrder` and `layoutHidden` hold
   // a change from the moment it is made until the binary has written it down, so a card does not
   // snap back for the length of a process.
-  readonly property var defaultCards: ["now", "sky", "nowcast", "map", "hours", "days", "air"]
+  readonly property var defaultCards: ["hours", "air", "sky", "days", "now", "nowcast", "map"]
   readonly property var cardLabels: ({
     now: "Now", sky: "Sky", nowcast: "Nowcast", map: "Map", hours: "Hours", days: "Days", air: "Air"
   })

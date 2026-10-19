@@ -41,7 +41,7 @@ pub struct Config {
 
 /// The cards a person can move and hide, in the order the window ships them. The settings,
 /// warnings and footer are page furniture, and an opened day stays glued to the days card.
-pub const DEFAULT_CARDS: [&str; 7] = ["now", "sky", "nowcast", "map", "hours", "days", "air"];
+pub const DEFAULT_CARDS: [&str; 7] = ["hours", "air", "sky", "days", "now", "nowcast", "map"];
 
 /// How many places the settings card can show in one go, and so how many are kept. A cap
 /// rather than a scroll: the row is for the four or five places a person actually lives in.
