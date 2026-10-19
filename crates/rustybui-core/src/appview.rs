@@ -120,6 +120,8 @@ pub struct HourlyView {
     pub clock_label: String,
     pub temperature_c: Option<f64>,
     pub temperature_label: Option<String>,
+    /// The apparent temperature for the hour, e.g. `11.2°` — the number only, the strip says it.
+    pub feels_like_label: Option<String>,
     pub condition_label: String,
     pub weather_code: Option<u32>,
     pub precipitation_mm: Option<f64>,
@@ -266,6 +268,9 @@ fn hourly_view(
         clock_label: clock(local, clock24),
         temperature_c: sample.temperature_c,
         temperature_label: temperature(sample.temperature_c, imperial),
+        feels_like_label: sample.apparent_temperature_c.map(|value| {
+            crate::units::format_temperature(value, imperial)
+        }),
         condition_label: sample.weather_code.map_or("—", condition_label).to_string(),
         weather_code: sample.weather_code,
         precipitation_mm: sample.precipitation_mm,

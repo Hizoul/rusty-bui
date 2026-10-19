@@ -62,6 +62,17 @@ Item {
             font.pixelSize: Style.font.body
           }
 
+          // The apparent temperature, under the air temperature. DWD does not publish one, so
+          // those hours leave the line out rather than showing a gap.
+          Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            visible: !!modelData.feelsLikeLabel
+            text: modelData.feelsLikeLabel || ""
+            color: Model.withAlpha(strip.foreground, 0.55)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+          }
+
           Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: modelData.probabilityLabel || ""
