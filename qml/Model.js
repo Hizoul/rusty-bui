@@ -10,7 +10,8 @@ var GLYPH = {
   heavy: "\ue31d", // thunderstorm — reserved for genuinely heavy rates
   rain: "\ue318", // rain
   light: "\ue333", // showers / light rain
-  dry: "\ue33d" // cloudy — nothing expected
+  dry: "\ue33d", // cloudy — nothing expected
+  setup: "\uf041" // map marker — no location stored yet, the pill opens the set-up popout
 }
 
 // Parses stdout of `rustybui bar --json`. `null` is the binary's way of saying
@@ -26,11 +27,15 @@ function parseView(raw) {
     return { ok: false, error: "unreadable nowcast payload" }
   }
 
+  // Fresh install: no location stored yet. Not an error, a state the popout sets up.
+  if (view && view.needsLocation === true)
+    return { ok: false, needsLocation: true, error: "no location set" }
+
   if (!view || !view.points || view.points.length === 0)
     return { ok: false, error: "no nowcast samples returned" }
 
   if (!view.summary) view.summary = {}
-  return { ok: true, view: view, error: "" }
+  return { ok: true, view: view, needsLocation: false, error: "" }
 }
 
 function shortIntensity(mmPerHour) {

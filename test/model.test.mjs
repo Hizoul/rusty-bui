@@ -106,6 +106,10 @@ check("null means the location is not covered", Model.parseView("null"), { ok: f
 check("blank output is a failure, not a crash", Model.parseView("").ok, false)
 check("garbage is reported, not thrown", Model.parseView("{oops").ok, false)
 check("an empty point list is a failure", Model.parseView('{"points":[]}').ok, false)
+// A fresh install: no location stored yet. Not a failure — the pill shows its set-up glyph.
+const unset = Model.parseView('{"needsLocation":true}')
+check("no stored location is a set-up state, not an error", [unset.ok, unset.needsLocation], [false, true])
+check("the set-up glyph is a map marker", Model.GLYPH.setup, "\uf041")
 
 // ---- the synthetic "rain later" fixture the render harness feeds the pill
 // (test/fixtures/make-bar-wet.py rewrites the captured dry payload's rates; this keeps the

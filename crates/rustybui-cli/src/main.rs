@@ -376,6 +376,13 @@ Open-Meteo returned nothing"
         }
 
         Command::Bar(args) => {
+            // A fresh install has no place yet. The pill still needs an answer so it can show its
+            // set-up state, so say so in the payload rather than failing the process.
+            if args.json && args.lat.is_none() && config.location.is_none() {
+                println!("{}", serde_json::json!({ "needsLocation": true }));
+                return Ok(());
+            }
+
             let location = resolve_location(args.lat, args.lon, args.name, &config)?;
             let service = service(cli.knmi_key, cli.offline)?;
             let timezone = location.timezone.clone().unwrap_or_else(|| "auto".to_string());

@@ -63,7 +63,8 @@ BarWidget {
   }
 
   // Hidden until the first payload lands, so an unreachable binary shows nothing
-  // rather than a reassuring "dry".
+  // rather than a reassuring "dry". A fresh install has a payload too (no location yet),
+  // and its label is the set-up glyph, so the pill is there to be clicked.
   visible: panelLoader.item ? panelLoader.item.label !== "" : false
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -103,8 +104,10 @@ BarWidget {
 
     onPressed: function(b) {
       if (!root.bar) return
+      // Without a location the only useful thing to open is the set-up popout.
+      var needsSetup = panelLoader.item ? panelLoader.item.needsLocation === true : false
       if (b === Qt.MiddleButton) root.refresh()
-      else if (b === Qt.RightButton) root.togglePanel()
+      else if (b === Qt.RightButton || needsSetup) root.togglePanel()
       else if (!windowOpener.running) windowOpener.running = true
     }
   }
