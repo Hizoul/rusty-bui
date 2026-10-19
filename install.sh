@@ -138,7 +138,10 @@ if ((!dry)) && command -v omarchy-shell >/dev/null; then
   omarchy-shell shell rescanPlugins || true
   if command -v omarchy >/dev/null; then
     for id in "${ids[@]}"; do
-      omarchy plugin enable "$id" --yes >/dev/null 2>&1 || true
+      # No --yes: `omarchy plugin enable` reads it as a placement and refuses. Failures are
+      # reported, not swallowed, so a plugin that is not on the bar says so here.
+      omarchy plugin enable "$id" >/dev/null 2>&1 \
+        || echo "!! could not enable $id — run: omarchy plugin enable $id" >&2
     done
   fi
 fi
