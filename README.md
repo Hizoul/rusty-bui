@@ -39,7 +39,12 @@ tar -xzf rustybui-v0.1.2-x86_64-unknown-linux-gnu.tar.gz -C ~/.local/bin rustybu
 omarchy plugin add https://github.com/Hizoul/omarchy-weather-nowcast.git --enable
 ```
 
-That repo carries **only the pill** (`mmb.rainnowcast`). The weather window (`mmb.weather`) lives in this repo, so also run `./install.sh --no-build` from a checkout (it installs both plugins, enables them, and adds the launcher entry and float rule). Without this step, `omarchy-shell shell toggle mmb.weather` does nothing, silently.
+That repo carries **only the pill** (`mmb.rainnowcast`). The weather window (`mmb.weather`) lives in this repo, so also run `./install.sh --no-build` from a checkout (it installs both plugins, enables them, and adds the launcher entry and float rule). The float rule is what makes the window open flush with the bar; only `install.sh` adds it. If you copied the plugins by hand, add this line to `~/.config/hypr/hyprland.lua` yourself, then run `hyprctl reload`:
+
+```lua
+-- rusty-bui: the weather window floats and opens flush with the bar
+o.window({ class = "^org.quickshell$", title = "^Weather$" }, { float = true, move = { "(monitor_w-window_w)/2", "26" } })
+``` Without this step, `omarchy-shell shell toggle mmb.weather` does nothing, silently.
 
 Until a location is stored, the pill shows a map-marker icon. Click it to search for your town and pick one, or set it yourself with `rustybui set-location "Leiden" --lat 52.16 --lon 4.49 --country NL --timezone Europe/Amsterdam`. The pill's settings can override the binary path.
 
