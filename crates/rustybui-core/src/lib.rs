@@ -29,7 +29,7 @@ pub use cache::{
 };
 pub use forecast::{CurrentWeather, DailyForecast, Forecast, HourlyForecast};
 pub use location::Location;
-pub use private_file::write_private;
+pub use private_file::{read_private_to_string, tighten_private, tighten_private_tree, write_private};
 pub use nowcast::{
     format_intensity, format_millimeters, format_minutes, intensity_class, DurationStyle, IntensityClass,
     NowcastPoint, NowcastProvider, NowcastSummary, RainNowcast, RAIN_THRESHOLD_MM_H,

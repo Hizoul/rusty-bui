@@ -138,6 +138,7 @@ impl NowcastService {
     /// `knmi_api_key` is optional: anonymous KNMI access works, a personal key
     /// just moves the request to the keyed host with its own quota.
     pub fn new(knmi_api_key: Option<String>) -> ProviderResult<Self> {
+        crate::cache::tighten_cache_files();
         let responses = ResponseCache::new();
         let clients = ClientSet::new(&knmi_api_key, &responses)?;
         Ok(Self { knmi_api_key, cache: DiskCache::new(), responses, clients })

@@ -16,7 +16,7 @@
 
 use crate::location::Location;
 use crate::nowcast::RainNowcast;
-use crate::private_file::write_private;
+use crate::private_file::{read_private_to_string, write_private};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -44,6 +44,15 @@ pub fn cycle_end(cycle: i64) -> i64 {
 /// `now` floored to the radar cycle it sits in.
 pub fn snap_to_cycle(now: DateTime<Utc>) -> DateTime<Utc> {
     DateTime::from_timestamp(cycle_start(now), 0).unwrap_or(now)
+}
+
+/// Tightens everything an older version left in the cache (nowcasts, responses, radar maps)
+/// to owner-only. Run once at startup: the files are named by coordinates, and a map that is
+/// never requested again would otherwise stay readable by other local users.
+pub fn tighten_cache_files() {
+    if let Some(root) = cache_root() {
+        crate::private_file::tighten_private_tree(&root);
+    }
 }
 
 fn cache_root() -> Option<PathBuf> {
@@ -106,7 +115,7 @@ impl DiskCache {
         if !self.enabled {
             return None;
         }
-        let raw = std::fs::read_to_string(self.path_for(location)).ok()?;
+        let raw = read_private_to_string(&self.path_for(location)).ok()?;
         let entry: CycleEntry = serde_json::from_str(&raw).ok()?;
         (entry.cycle >= cycle && !entry.nowcast.is_empty()).then_some(entry.nowcast)
     }
@@ -206,7 +215,7 @@ impl ResponseCache {
     }
 
     fn read(&self, key: &str) -> Option<CachedResponse> {
-        let raw = std::fs::read_to_string(self.path_for(key)).ok()?;
+        let raw = read_private_to_string(&self.path_for(key)).ok()?;
         serde_json::from_str(&raw).ok()
     }
 

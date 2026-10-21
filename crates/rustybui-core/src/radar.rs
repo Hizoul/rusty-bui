@@ -202,6 +202,8 @@ impl RadarMapClient {
     /// online; anything on disk at all when there is no network to ask.
     fn cached_image(&self, path: &Path, offline: bool) -> Option<PathBuf> {
         let metadata = std::fs::metadata(path).ok()?;
+        // The shell loads this by path, so tighten a map an older version left world-readable.
+        crate::private_file::tighten_private(path);
         if offline {
             return Some(path.to_path_buf());
         }

@@ -103,7 +103,7 @@ impl Config {
     /// still works with explicit `--lat/--lon`.
     pub fn load() -> Self {
         let Some(path) = Self::path() else { return Self::default() };
-        std::fs::read_to_string(path)
+        rustybui_core::read_private_to_string(&path)
             .ok()
             .and_then(|raw| serde_json::from_str(&raw).ok())
             .unwrap_or_default()
