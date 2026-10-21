@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "mmb.weather",
   "name": "Weather",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "author": "Matthias MB (@Hizoul)",
   "description": "Weather window: current conditions, the two-hour rain nowcast, hourly and daily outlook, air quality — from KNMI, DWD and Open-Meteo",
   "kinds": ["panel"],

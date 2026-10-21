@@ -25,12 +25,12 @@ git clone https://github.com/Hizoul/rusty-bui.git && cd rusty-bui
 or grab a prebuilt one from [Releases](https://github.com/Hizoul/rusty-bui/releases). Verify the checksum before installing (every release from v0.1.2 on ships a `SHA256SUMS` file):
 
 ```bash
-base=https://github.com/Hizoul/rusty-bui/releases/download/v0.1.2
-curl -fsSLO $base/rustybui-v0.1.2-x86_64-unknown-linux-gnu.tar.gz
+base=https://github.com/Hizoul/rusty-bui/releases/download/v0.1.3
+curl -fsSLO $base/rustybui-v0.1.3-x86_64-unknown-linux-gnu.tar.gz
 curl -fsSLO $base/SHA256SUMS
 grep 'x86_64-unknown-linux-gnu.tar.gz' SHA256SUMS | sha256sum -c -   # must print OK
 mkdir -p ~/.local/bin
-tar -xzf rustybui-v0.1.2-x86_64-unknown-linux-gnu.tar.gz -C ~/.local/bin rustybui && chmod +x ~/.local/bin/rustybui
+tar -xzf rustybui-v0.1.3-x86_64-unknown-linux-gnu.tar.gz -C ~/.local/bin rustybui && chmod +x ~/.local/bin/rustybui
 ```
 
 **2. The bar pill** — from the generated plugin repo:

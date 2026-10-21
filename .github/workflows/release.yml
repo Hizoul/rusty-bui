@@ -1,9 +1,9 @@
 # Build prebuilt rustybui binaries on a version tag and attach them to the release.
 #
-# Tag like `v0.1.2` (bump Cargo.toml workspace.version and both manifest.json
+# Tag like `v0.1.3` (bump Cargo.toml workspace.version and both manifest.json
 # versions in the same commit). produces:
-#   rustybui-v0.1.2-x86_64-unknown-linux-gnu.tar.gz
-#   rustybui-v0.1.2-aarch64-unknown-linux-gnu.tar.gz  (cross-compiled; smoke-checked by `--help`)
+#   rustybui-v0.1.3-x86_64-unknown-linux-gnu.tar.gz
+#   rustybui-v0.1.3-aarch64-unknown-linux-gnu.tar.gz  (cross-compiled; smoke-checked by `--help`)
 #   SHA256SUMS                                        (checksums for both tarballs)
 #
 # Releases are immutable (repo setting), so assets cannot be swapped after publish.
